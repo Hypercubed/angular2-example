@@ -9,6 +9,8 @@
   "jspm": {
     "dependencies": {
       "angular2": "npm:angular2@^2.0.0-alpha.37",
+      "bootstrap": "github:twbs/bootstrap@^3.3.5",
+      "clean-css": "npm:clean-css@^3.4.4",
       "css": "github:systemjs/plugin-css@^0.1.17",
       "es6-shim": "github:es-shims/es6-shim@^0.33.3",
       "reflect-metadata": "npm:reflect-metadata@^0.1.1",
@@ -18,9 +20,14 @@
     "devDependencies": {
       "traceur": "github:jmcriffey/bower-traceur@0.0.88",
       "traceur-runtime": "github:jmcriffey/bower-traceur-runtime@0.0.88"
+    },
+    "buildConfig": {
+      "transpileES6": true,
+      "minify": true
     }
   },
   "devDependencies": {
+    "jspm": "^0.16.6",
     "live-server": "^0.8.1"
   }
 }
