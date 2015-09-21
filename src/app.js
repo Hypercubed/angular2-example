@@ -5,7 +5,7 @@ import './app.css!';
 @Component({ selector: 'my-app' })
 @View({
   template: appTemplate,
-	directives: [FORM_DIRECTIVES]
+  directives: [FORM_DIRECTIVES]
 })
 export class AppComponent {
   constructor(){
@@ -1205,7 +1205,7 @@ var replaceText = [
   [/\bbe+\b/gi, 'b'],
 
   [/\? /g, '?'],
-  [/\! /g, '!'],
+  [/\! /g, '!']
 
   //synymons for plurals, preserve capitalization, smarter ordering
   //more 1337 speak

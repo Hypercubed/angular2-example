@@ -3,7 +3,8 @@
   "private": "true",
   "version": "0.0.1",
   "scripts": {
-    "start": "live-server"
+    "start": "live-server",
+    "eslint": "./node_modules/.bin/eslint src/*.js"
   },
   "dependencies": {},
   "jspm": {
@@ -27,6 +28,8 @@
     }
   },
   "devDependencies": {
+    "babel-eslint": "^4.1.3",
+    "eslint": "^1.5.0",
     "jspm": "^0.16.6",
     "live-server": "^0.8.1"
   }
