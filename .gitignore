@@ -1,5 +1,6 @@
 .vscode
 node_modules
+jspm_packages
 
 src/**/*.js
 src/**/*.map
