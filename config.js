@@ -1,5 +1,5 @@
 System.config({
-  baseURL: "/",
+  baseURL: "./",
   defaultJSExtensions: true,
   transpiler: "traceur",
   traceurOptions: {
@@ -285,7 +285,6 @@ System.config({
     },
     "npm:reflect-metadata@0.1.1": {
       "assert": "github:jspm/nodelibs-assert@0.1.0",
-      "crypto": "github:jspm/nodelibs-crypto@0.1.0",
       "process": "github:jspm/nodelibs-process@0.1.1"
     },
     "npm:ripemd160@1.0.1": {
