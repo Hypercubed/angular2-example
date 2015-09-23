@@ -4,10 +4,9 @@
   "version": "0.0.1",
   "scripts": {
     "start": "live-server",
-    "start:dist": "live-server ./dist/",
+    "start:dist": "npm run jspm:bundle && live-server",
     "eslint": "./node_modules/.bin/eslint src/*.js",
-    "jspm:bundle": "jspm bundle src/boot --inject",
-    "jspm:unbundle": "jspm unbundle",
+    "jspm:bundle": "jspm bundle src/boot --inject --minify",
     "deploy": "npm run jspm:bundle && gulp ghPages && jspm unbundle"
   },
   "dependencies": {},
