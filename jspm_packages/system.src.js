@@ -1,5 +1,5 @@
 /*
- * SystemJS v0.19.0
+ * SystemJS v0.19.9
  */
 (function() {
 function bootstrap() {(function(__global) {
@@ -462,13 +462,14 @@ function logloads(loads) {
         if (loader.loads[i].name == name) {
           existingLoad = loader.loads[i];
 
-          if(step == 'translate' && !existingLoad.source) {
+          if (step == 'translate' && !existingLoad.source) {
             existingLoad.address = stepState.moduleAddress;
             proceedToTranslate(loader, existingLoad, Promise.resolve(stepState.moduleSource));
           }
 
-          // a primary load -> use that existing linkset
-          if (existingLoad.linkSets.length)
+          // a primary load -> use that existing linkset if it is for the direct load here
+          // otherwise create a new linkset unit
+          if (existingLoad.linkSets.length && existingLoad.linkSets[0].loads[0].name == existingLoad.name)
             return existingLoad.linkSets[0].done.then(function() {
               resolve(existingLoad);
             });
@@ -836,19 +837,14 @@ function logloads(loads) {
       if (typeof obj != 'object')
         throw new TypeError('Expected object');
 
-      // we do this to be able to tell if a module is a module privately in ES5
-      // by doing m instanceof Module
       var m = new Module();
 
-      var pNames;
-      if (Object.getOwnPropertyNames && obj != null) {
+      var pNames = [];
+      if (Object.getOwnPropertyNames && obj != null)
         pNames = Object.getOwnPropertyNames(obj);
-      }
-      else {
-        pNames = [];
+      else
         for (var key in obj)
           pNames.push(key);
-      }
 
       for (var i = 0; i < pNames.length; i++) (function(key) {
         defineProperty(m, key, {
@@ -859,9 +855,6 @@ function logloads(loads) {
           }
         });
       })(pNames[i]);
-
-      if (Object.preventExtensions)
-        Object.preventExtensions(m);
 
       return m;
     },
@@ -958,7 +951,7 @@ function SystemLoader() {
 // NB no specification provided for System.paths, used ideas discussed in https://github.com/jorendorff/js-loaders/issues/25
 function applyPaths(paths, name) {
   // most specific (most number of slashes in path) match wins
-  var pathMatch = '', wildcard, maxSlashCount = 0;
+  var pathMatch = '', wildcard, maxWildcardPrefixLen = 0;
 
   // check to see if we have a paths entry
   for (var p in paths) {
@@ -975,11 +968,11 @@ function applyPaths(paths, name) {
     }
     // wildcard path match
     else {
-      var slashCount = p.split('/').length;
-      if (slashCount >= maxSlashCount &&
+      var wildcardPrefixLen = pathParts[0].length;
+      if (wildcardPrefixLen >= maxWildcardPrefixLen &&
           name.substr(0, pathParts[0].length) == pathParts[0] &&
           name.substr(name.length - pathParts[1].length) == pathParts[1]) {
-            maxSlashCount = slashCount;
+            maxWildcardPrefixLen = wildcardPrefixLen;
             pathMatch = p;
             wildcard = name.substr(pathParts[0].length, name.length - pathParts[1].length - pathParts[0].length);
           }
@@ -1030,9 +1023,22 @@ SystemLoader.prototype = new LoaderProto();
 
       xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
-          if (xhr.status === 200 || (xhr.status == 0 && xhr.responseText)) {
+          // in Chrome on file:/// URLs, status is 0
+          if (xhr.status == 0) {
+            if (xhr.responseText) {
+              load();
+            }
+            else {
+              // when responseText is empty, wait for load or error event
+              // to inform if it is a 404 or empty file
+              xhr.addEventListener('error', error);
+              xhr.addEventListener('load', load);
+            }
+          }
+          else if (xhr.status === 200) {
             load();
-          } else {
+          }
+          else {
             error();
           }
         }
@@ -1049,15 +1055,16 @@ SystemLoader.prototype = new LoaderProto();
         }
       }
 
-      if (doTimeout)
+      if (doTimeout) {
         setTimeout(function() {
           xhr.send();
         }, 0);
-
-      xhr.send(null);
+      } else {
+        xhr.send(null);
+      }
     };
   }
-  else if (typeof require != 'undefined') {
+  else if (typeof require != 'undefined' && typeof process != 'undefined') {
     var fs;
     fetchTextFromURL = function(url, authorization, fulfill, reject) {
       if (url.substr(0, 8) != 'file:///')
@@ -1081,6 +1088,29 @@ SystemLoader.prototype = new LoaderProto();
         }
       });
     };
+  }
+  else if (typeof self != 'undefined' && typeof self.fetch != 'undefined') {
+    fetchTextFromURL = function(url, authorization, fulfill, reject) {
+      var opts = {
+        headers: {'Accept': 'application/x-es-module, */*'}
+      };
+
+      if (authorization) {
+        if (typeof authorization == 'string')
+          opts.headers['Authorization'] = authorization;
+        opts.credentials = 'include';
+      }
+
+      fetch(url, opts)
+        .then(function (r) {
+          if (r.ok) {
+            return r.text();
+          } else {
+            throw new Error('Fetch error: ' + r.status + ' ' + r.statusText);
+          }
+        })
+        .then(fulfill, reject);
+    }
   }
   else {
     throw new TypeError('No environment fetch API available.');
@@ -1163,7 +1193,7 @@ var transpile = (function() {
     options.target = options.target || ts.ScriptTarget.ES5;
     if (options.sourceMap === undefined)
       options.sourceMap = true;
-    if (options.sourceMap)
+    if (options.sourceMap && options.inlineSourceMap !== false)
       options.inlineSourceMap = true;
 
     options.module = ts.ModuleKind.System;
@@ -1173,105 +1203,7 @@ var transpile = (function() {
 
   return transpile;
 })();
-// we define a __exec for globally-scoped execution
-// used by module format implementations
-var __exec;
-
-(function() {
-
-  // System clobbering protection (mostly for Traceur)
-  var curSystem;
-  function preExec(loader) {
-    curSystem = __global.System;
-    __global.System = loader;
-  }
-  function postExec() {
-    __global.System = curSystem;
-  }
-
-  var hasBtoa = typeof btoa != 'undefined';
-
-  function getSource(load) {
-    var lastLineIndex = load.source.lastIndexOf('\n');
-
-    return load.source
-        // adds the sourceURL comment if not already present
-        + (load.source.substr(lastLineIndex, 15) != '\n//# sourceURL=' 
-          ? '\n//# sourceURL=' + load.address + (load.metadata.sourceMap ? '!transpiled' : '') : '')
-        // add sourceMappingURL if load.metadata.sourceMap is set
-        + (load.metadata.sourceMap && hasBtoa && 
-          '\n//# sourceMappingURL=data:application/json;base64,' + btoa(unescape(encodeURIComponent(load.metadata.sourceMap))) || '')
-  }
-
-  // Web Worker and Chrome Extensions use original ESML eval
-  // this may lead to some global module execution differences (eg var not defining onto global)
-  if (isWorker || isBrowser && window.chrome && window.chrome.extension) {
-    __exec = function(load) {
-      if (load.metadata.integrity)
-        throw new Error('Subresource integrity checking is not supported in Web Workers or Chrome Extensions.');
-      try {
-        preExec(this);
-        new Function(getSource(load)).call(__global);
-        postExec();
-      }
-      catch(e) {
-        throw addToError(e, 'Evaluating ' + load.address);
-      }
-    };
-  }
-
-  // use script injection eval to get identical global script behaviour
-  else if (typeof document != 'undefined') {
-    var head;
-
-    var scripts = document.getElementsByTagName('script');
-    $__curScript = scripts[scripts.length - 1];
-
-    __exec = function(load) {
-      if (!head)
-        head = document.head || document.body || document.documentElement;
-
-      var script = document.createElement('script');
-      script.text = getSource(load);
-      var onerror = window.onerror;
-      var e;
-      window.onerror = function(_e) {
-        e = addToError(_e, 'Evaluating ' + load.address);
-      }
-      preExec(this);
-
-      if (load.metadata.integrity)
-        script.setAttribute('integrity', load.metadata.integrity);
-      if (load.metadata.nonce)
-        script.setAttribute('nonce', load.metadata.nonce);
-
-      head.appendChild(script);
-      head.removeChild(script);
-      postExec();
-      window.onerror = onerror;
-      if (e)
-        throw e;
-    }
-  }
-  else {
-    // global scoped eval for node
-    var vmModule = 'vm';
-    var vm = require(vmModule);
-    __exec = function(load) {
-      if (load.metadata.integrity)
-        throw new Error('Subresource integrity checking is unavailable in Node.');
-      try {
-        preExec(this);
-        vm.runInThisContext(getSource(load));
-        postExec();
-      }
-      catch(e) {
-        throw addToError(e.toString(), 'Evaluating ' + load.address);
-      }
-    };
-  }
-
-})();// SystemJS Loader Class and Extension helpers
+// SystemJS Loader Class and Extension helpers
 
 function SystemJSLoader() {
   SystemLoader.call(this);
@@ -1288,7 +1220,7 @@ SystemJSLoader.prototype.constructor = SystemJSLoader;
 var systemJSConstructor;
 
 function hook(name, hook) {
-  SystemJSLoader.prototype[name] = hook(SystemJSLoader.prototype[name]);
+  SystemJSLoader.prototype[name] = hook(SystemJSLoader.prototype[name] || function() {});
 }
 function hookConstructor(hook) {
   systemJSConstructor = hook(systemJSConstructor || function() {});
@@ -1374,7 +1306,7 @@ function extendMeta(a, b, prepend) {
       a[p] = val;
     else if (val instanceof Array && a[p] instanceof Array)
       a[p] = [].concat(prepend ? val : a[p]).concat(prepend ? a[p] : val);
-    else if (typeof val == 'object' && typeof a[p] == 'object')
+    else if (typeof val == 'object' && val !== null && typeof a[p] == 'object')
       a[p] = extend(extend({}, a[p]), val, prepend);
     else if (!prepend)
       a[p] = val;
@@ -1384,7 +1316,136 @@ function extendMeta(a, b, prepend) {
 function warn(msg) {
   if (this.warnings && typeof console != 'undefined' && console.warn)
     console.warn(msg);
-}/*
+}// we define a __exec for globally-scoped execution
+// used by module format implementations
+var __exec;
+
+(function() {
+
+  // System clobbering protection (mostly for Traceur)
+  var curSystem;
+  var callCounter = 0;
+  var curLoad;
+  function preExec(loader, load) {
+    if (callCounter++ == 0)
+      curSystem = __global.System;
+    __global.System = loader;
+    curLoad = load;
+  }
+  function postExec() {
+    if (--callCounter == 0)
+      __global.System = curSystem;
+    curLoad = undefined;
+  }
+
+  // System.register, System.registerDynamic, AMD define pipeline
+  // if currently evalling code here, immediately reduce the registered entry against the load record
+  hook('pushRegister_', function() {
+    return function(register) {
+      if (!curLoad)
+        return false;
+
+      this.reduceRegister_(curLoad, register);
+      return true;
+    };
+  });
+
+  var hasBtoa = typeof btoa != 'undefined';
+
+  // used to support leading #!/usr/bin/env in scripts as supported in Node
+  var hashBangRegEx = /^\#\!.*/;
+
+  function getSource(load) {
+    var lastLineIndex = load.source.lastIndexOf('\n');
+
+    // wrap ES formats with a System closure for System global encapsulation
+    var wrap = load.metadata.format == 'esm' || load.metadata.format == 'register' || load.metadata.bundle;
+
+    return (wrap ? '(function(System) {' : '') + (load.metadata.format == 'cjs' ? load.source.replace(hashBangRegEx, '') : load.source) + (wrap ? '\n})(System);' : '')
+        // adds the sourceURL comment if not already present
+        + (load.source.substr(lastLineIndex, 15) != '\n//# sourceURL=' 
+          ? '\n//# sourceURL=' + load.address + (load.metadata.sourceMap ? '!transpiled' : '') : '')
+        // add sourceMappingURL if load.metadata.sourceMap is set
+        + (load.metadata.sourceMap && hasBtoa && 
+          '\n//# sourceMappingURL=data:application/json;base64,' + btoa(unescape(encodeURIComponent(load.metadata.sourceMap))) || '')
+  }
+
+  function evalExec(load) {
+    if (load.metadata.integrity)
+      throw new TypeError('Subresource integrity checking is not supported in Web Workers or Chrome Extensions.');
+    try {
+      preExec(this, load);
+      new Function(getSource(load)).call(__global);
+      postExec();
+    }
+    catch(e) {
+      postExec();
+      throw addToError(e, 'Evaluating ' + load.address);
+    }
+  }
+
+  // use script injection eval to get identical global script behaviour
+  if (typeof document != 'undefined' && document.getElementsByTagName) {
+    var head;
+
+    var scripts = document.getElementsByTagName('script');
+    $__curScript = scripts[scripts.length - 1];
+    __exec = function(load) {
+      if (!this.globalEvaluationScope)
+        return evalExec.call(this, load);
+
+      if (!head)
+        head = document.head || document.body || document.documentElement;
+
+      var script = document.createElement('script');
+      script.text = getSource(load);
+      var onerror = window.onerror;
+      var e;
+      window.onerror = function(_e) {
+        e = addToError(_e, 'Evaluating ' + load.address);
+      }
+      preExec(this, load);
+
+      if (load.metadata.integrity)
+        script.setAttribute('integrity', load.metadata.integrity);
+      if (load.metadata.nonce)
+        script.setAttribute('nonce', load.metadata.nonce);
+
+      head.appendChild(script);
+      head.removeChild(script);
+      postExec();
+      window.onerror = onerror;
+      if (e)
+        throw e;
+    };
+  }
+
+  // global scoped eval for node
+  else if (typeof require != 'undefined') {
+    var vmModule = 'vm';
+    var vm = require(vmModule);
+    __exec = function vmExec(load) {
+      if (!this.globalEvaluationScope)
+        return evalExec.call(this, load);
+
+      if (load.metadata.integrity)
+        throw new TypeError('Subresource integrity checking is unavailable in Node.');
+      try {
+        preExec(this, load);
+        vm.runInThisContext(getSource(load));
+        postExec();
+      }
+      catch(e) {
+        postExec();
+        throw addToError(e.toString(), 'Evaluating ' + load.address);
+      }
+    };
+  }
+  else {
+    __exec = evalExec;
+  }
+
+})();/*
   SystemJS map support
   
   Provides map configuration through
@@ -1454,6 +1515,16 @@ function getBaseURLObj() {
   return (baseURLCache[this.baseURL] = baseURL);
 }
 
+function setConditional(mode) {
+  this.set('@system-env', this.newModule({
+    browser: isBrowser,
+    node: !!this._nodeRequire,
+    env: mode,
+    production: mode == 'production',
+    development: mode == 'development'
+  }));
+}
+
 var baseURIObj = new URL(baseURI);
 
 hookConstructor(function(constructor) {
@@ -1463,14 +1534,34 @@ hookConstructor(function(constructor) {
     // support baseURL
     this.baseURL = baseURI.substr(0, baseURI.lastIndexOf('/') + 1);
 
+    // global behaviour flags
+    this.warnings = false;
+    this.defaultJSExtensions = false;
+    this.globalEvaluationScope = true;
+    this.pluginFirst = false;
+
+    // Default settings for globalEvaluationScope:
+    // Disabled for WebWorker, Chrome Extensions and jsdom
+    if (isWorker 
+        || isBrowser && window.chrome && window.chrome.extension 
+        || isBrowser && navigator.userAgent.match(/^Node\.js/))
+      this.globalEvaluationScope = false;
+
     // support the empty module, as a concept
     this.set('@empty', this.newModule({}));
 
-    // include the node require since we're overriding it
-    if (typeof require != 'undefined' && require.resolve && typeof process != 'undefined')
-      this._nodeRequire = require;
+    setConditional.call(this, 'development');
   };
 });
+
+// include the node require since we're overriding it
+if (typeof require != 'undefined' && typeof process != 'undefined' && !process.browser)
+  SystemJSLoader.prototype._nodeRequire = require;
+
+var nodeCoreModules = ['assert', 'buffer', 'child_process', 'cluster', 'console', 'constants', 
+    'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https', 'module', 'net', 'os', 'path', 
+    'process', 'punycode', 'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'sys', 'timers', 
+    'tls', 'tty', 'url', 'util', 'vm', 'zlib'];
 
 /*
   Normalization
@@ -1487,32 +1578,38 @@ hookConstructor(function(constructor) {
 
   The final normalization 
  */
-
 hook('normalize', function(normalize) {
   return function(name, parentName) {
-    // dynamically load node-core modules when requiring `@node/fs` for example
-    if (name.substr(0, 6) == '@node/') {
-      if (!this._nodeRequire)
-        throw new TypeError('Can only load node core modules in Node.');
-      this.set(name, this.newModule(getESModule(this._nodeRequire(name.substr(6)))));
-    }
-
     // first run map config
     name = normalize.apply(this, arguments);
+
+    // dynamically load node-core modules when requiring `@node/fs` for example
+    if (name.substr(0, 6) == '@node/' && nodeCoreModules.indexOf(name.substr(6)) != -1) {
+      if (!this._nodeRequire)
+        throw new TypeError('Error loading ' + name + '. Can only load node core modules in Node.');
+      this.set(name, this.newModule(getESModule(this._nodeRequire(name.substr(6)))));
+    }
     
     // relative URL-normalization
-    if (name[0] == '.' || name[0] == '/')
-      return new URL(name, parentName || baseURIObj).href;
+    if (name[0] == '.' || name[0] == '/') {
+      if (parentName)
+        return new URL(name, parentName.replace(/#/g, '%05')).href.replace(/%05/g, '#');
+      else
+        return new URL(name, baseURIObj).href;
+    }
     return name;
   };
 });
 
-// percent encode just '#' in urls
+// percent encode just '#' in urls if using HTTP requests
+var httpRequest = typeof XMLHttpRequest != 'undefined';
 hook('locate', function(locate) {
   return function(load) {
     return Promise.resolve(locate.call(this, load))
     .then(function(address) {
-      return address.replace(/#/g, '%23');
+      if (httpRequest)
+        return address.replace(/#/g, '%23');
+      return address;
     });
   };
 });
@@ -1553,6 +1650,17 @@ hook('import', function(systemImport) {
 });
 
 /*
+ * Allow format: 'detect' meta to enable format detection
+ */
+hook('translate', function(systemTranslate) {
+  return function(load) {
+    if (load.metadata.format == 'detect')
+      load.metadata.format = undefined;
+    return systemTranslate.call(this, load);
+  };
+});
+
+/*
  Extend config merging one deep only
 
   loader.config({
@@ -1586,7 +1694,8 @@ hook('import', function(systemImport) {
   For easy normalization canonicalization with latest URL support.
 
 */
-SystemJSLoader.prototype.warnings = false;
+SystemJSLoader.prototype.env = 'development';
+
 SystemJSLoader.prototype.config = function(cfg) {
   if ('warnings' in cfg)
     this.warnings = cfg.warnings;
@@ -1598,8 +1707,8 @@ SystemJSLoader.prototype.config = function(cfg) {
       for (var p in obj)
         return true;
     }
-    if (checkHasConfig(this.packages) || checkHasConfig(this.meta) || checkHasConfig(this.depCache) || checkHasConfig(this.bundles))
-      throw new TypeError('baseURL should only be configured once and must be configured first.');
+    if (checkHasConfig(this.packages) || checkHasConfig(this.meta) || checkHasConfig(this.depCache) || checkHasConfig(this.bundles) || checkHasConfig(this.packageConfigPaths))
+      throw new TypeError('Incorrect configuration order. The baseURL must be configured with the first System.config call.');
 
     this.baseURL = cfg.baseURL;
 
@@ -1614,6 +1723,12 @@ SystemJSLoader.prototype.config = function(cfg) {
 
   if (cfg.pluginFirst)
     this.pluginFirst = cfg.pluginFirst;
+
+  if (cfg.env) {
+    if (cfg.env != 'production' && cfg.env != 'development')
+      throw new TypeError('The config environment must be set to "production" or "development".');
+    setConditional.call(this, cfg.env);
+  }
 
   if (cfg.paths) {
     for (var p in cfg.paths)
@@ -1679,10 +1794,19 @@ SystemJSLoader.prototype.config = function(cfg) {
       prop = prop.substr(0, prop.length - 1);
 
       // if doing default js extensions, undo to get package name
-      if (this.defaultJSExtensions && p.substr(p.length - 3, 3) != '.js')
+      // (unless already a package which would have skipped extension)
+      if (!this.packages[prop] && this.defaultJSExtensions && p.substr(p.length - 3, 3) != '.js')
         prop = prop.substr(0, prop.length - 3);
 
-      this.packages[prop]= this.packages[prop] || {};
+      this.packages[prop] = this.packages[prop] || {};
+
+      // meta backwards compatibility
+      if (cfg.packages[p].modules) {
+        warn.call(this, 'Package ' + p + ' is configured with "modules", which is deprecated as it has been renamed to "meta".');
+        cfg.packages[p].meta = cfg.packages[p].modules;
+        delete cfg.packages[p].modules;
+      }
+
       for (var q in cfg.packages[p])
         if (indexOf.call(packageProperties, q) == -1)
           warn.call(this, '"' + q + '" is not a valid package configuration option in package ' + p);
@@ -1771,7 +1895,7 @@ hook('normalize', function(normalize) {
  *     main: 'index.js', // when not set, package name is requested directly
  *     format: 'amd',
  *     defaultExtension: 'ts', // defaults to 'js', can be set to false
- *     meta: {
+ *     modules: {
  *       '*.ts': {
  *         loader: 'typescript'
  *       },
@@ -1798,7 +1922,7 @@ hook('normalize', function(normalize) {
  *       // import 'package/index.js' loads in parallel package/lib/test.js,package/vendor/sizzle.js
  *       './index.js': ['./test'],
  *       './test.js': ['sizzle']
- *     } 
+ *     }
  *   }
  * };
  *
@@ -1811,21 +1935,21 @@ hook('normalize', function(normalize) {
  * Detailed Behaviours
  * - main can have a leading "./" can be added optionally
  * - map and defaultExtension are applied to the main
- * - defaultExtension adds the extension only if no other extension is present
+ * - defaultExtension adds the extension only if the exact extension is not present
  * - defaultJSExtensions applies after map when defaultExtension is not set
- * - if a meta value is available for a module, map and defaultExtension are skipped
+ * - if a modules value is available for a module, map and defaultExtension are skipped
  * - like global map, package map also applies to subpaths (sizzle/x, ./vendor/another/sub)
  * - condition module map is '@env' module in package or '@system-env' globally
  *
- * In addition, the following meta properties will be allowed to be package
- * -relative as well in the package meta config:
- *   
+ * In addition, the following modules properties will be allowed to be package
+ * -relative as well in the package module config:
+ *
  *   - loader
  *   - alias
  *
  *
  * Package Configuration Loading
- * 
+ *
  * Not all packages may already have their configuration present in the System config
  * For these cases, a list of packageConfigPaths can be provided, which when matched against
  * a request, will first request a ".json" file by the package name to derive the package
@@ -1833,7 +1957,7 @@ hook('normalize', function(normalize) {
  * case in SystemJS.
  *
  * Example:
- * 
+ *
  *   System.packageConfigPaths = ['packages/test/package.json', 'packages/*.json'];
  *
  *   // will first request 'packages/new-package/package.json' for the package config
@@ -1848,11 +1972,11 @@ hook('normalize', function(normalize) {
  * The package name itself is taken to be the match up to and including the last wildcard
  * or trailing slash.
  * Package config paths are ordered - matching is done based on the first match found.
- * Any existing package configurations for the package will deeply merge with the 
+ * Any existing package configurations for the package will deeply merge with the
  * package config, with the existing package configurations taking preference.
  * To opt-out of the package configuration request for a package that matches
  * packageConfigPaths, use the { configured: true } package config option.
- * 
+ *
  */
 (function() {
 
@@ -1861,6 +1985,8 @@ hook('normalize', function(normalize) {
       constructor.call(this);
       this.packages = {};
       this.packageConfigPaths = {};
+      this._loader.pkgConfigPromises = {};
+      this._loader.pkgBundlePromises = {};
     };
   });
 
@@ -1881,7 +2007,7 @@ hook('normalize', function(normalize) {
 
   function applyMap(map, name) {
     var bestMatch, bestMatchLength = 0;
-    
+
     for (var p in map) {
       if (name.substr(0, p.length) == p && (name.length == p.length || name[p.length] == '/')) {
         var curMatchLength = p.split('/').length;
@@ -1908,18 +2034,25 @@ hook('normalize', function(normalize) {
   }
 
   // given the package subpath, return the resultant combined path
-  // defaultExtension is only added if the path does not have 
+  // defaultExtension is only added if the path does not have
   // loader package meta or exact package meta
   // We also re-incorporate package-level conditional syntax at this point
   // allowing package map and package mains to point to conditionals
-  // when conditionals are present, 
+  // when conditionals are present,
   function toPackagePath(loader, pkgName, pkg, basePath, subPath, sync, isPlugin) {
     // skip if its a plugin call already, or we have boolean / interpolation conditional syntax in subPath
     var skipExtension = !!(isPlugin || subPath.indexOf('#?') != -1 || subPath.match(interpolationRegEx));
 
     // exact meta or meta with any content after the last wildcard skips extension
     if (!skipExtension && pkg.meta)
-      getMetaMatches(pkg.meta, pkgName, subPath, function(metaPattern, matchMeta, matchDepth) {
+      getMetaMatches(pkg.meta, subPath, function(metaPattern, matchMeta, matchDepth) {
+        if (matchDepth == 0 || metaPattern.lastIndexOf('*') != metaPattern.length - 1)
+          skipExtension = true;
+      });
+
+    // exact global meta or meta with any content after the last wildcard skips extension
+    if (!skipExtension && loader.meta)
+      getMetaMatches(loader.meta, pkgName + '/' + basePath + subPath, function(metaPattern, matchMeta, matchDepth) {
         if (matchDepth == 0 || metaPattern.lastIndexOf('*') != metaPattern.length - 1)
           skipExtension = true;
       });
@@ -1956,7 +2089,7 @@ hook('normalize', function(normalize) {
     if (normalized.length == pkgName.length + 1 && normalized[pkgName.length] == '/')
       return normalized;
 
-    // no submap if name is package itself
+    // also no submap if name is package itself (import 'pkg' -> 'path/to/pkg.js')
     if (normalized.length == pkgName.length)
       return normalized + (loader.defaultJSExtensions && normalized.substr(normalized.length - 3, 3) != '.js' ? '.js' : '');
 
@@ -1976,7 +2109,7 @@ hook('normalize', function(normalize) {
         return toPackagePath(loader, pkgName, pkg, basePath, mapped.substr(2), sync, isPlugin);
       // global package map
       else
-        return (sync ? loader.normalizeSync : loader.normalize).call(loader, mapped); 
+        return (sync ? loader.normalizeSync : loader.normalize).call(loader, mapped);
     }
 
     // apply non-environment map match
@@ -2004,7 +2137,7 @@ hook('normalize', function(normalize) {
 
         if (!negate && value || negate && !value)
           return mapped[e] + subPath.substr(map.length);
-      }        
+      }
     })
     .then(function(mapped) {
       // no environment match
@@ -2018,11 +2151,11 @@ hook('normalize', function(normalize) {
   function createPackageNormalize(normalize, sync) {
     return function(name, parentName, isPlugin) {
       isPlugin = isPlugin === true;
-      
+
       // apply contextual package map first
       if (parentName)
-        var parentPackage = getPackage.call(this, parentName) || 
-            this.defaultJSExtensions && parentName.substr(parentName.length - 3, 3) == '.js' && 
+        var parentPackage = getPackage.call(this, parentName) ||
+            this.defaultJSExtensions && parentName.substr(parentName.length - 3, 3) == '.js' &&
             getPackage.call(this, parentName.substr(0, parentName.length - 3));
 
       if (parentPackage) {
@@ -2036,6 +2169,8 @@ hook('normalize', function(normalize) {
           if (parentMap) {
             var map = applyMap(parentMap, name);
             if (map) {
+              if (typeof parentMap[map] != 'string')
+                throw new TypeError('Unable to map an external require condition while normalizing ' + name + ', pending https://github.com/systemjs/systemjs/issues/937.');
               name = parentMap[map] + name.substr(map.length);
               // relative maps are package-relative
               if (name[0] === '.')
@@ -2098,6 +2233,7 @@ hook('normalize', function(normalize) {
       // ensure that any bundles in this package are triggered, and
       // all that are triggered block any further loads in the package
       .then(function(bundle) {
+        var pkgBundlePromises = loader._loader.pkgBundlePromises;
         if (bundle || pkgBundlePromises[pkgConfigMatch.pkgName]) {
           var pkgBundleLoads = pkgBundlePromises[pkgConfigMatch.pkgName] = pkgBundlePromises[pkgConfigMatch.pkgName] || { bundles: [], promise: Promise.resolve() };
           if (bundle && indexOf.call(pkgBundleLoads.bundles, bundle) == -1) {
@@ -2107,7 +2243,7 @@ hook('normalize', function(normalize) {
           return pkgBundleLoads.promise;
         }
       })
-      
+
       // having loaded any bundles, attempt a package resolution now
       .then(function() {
         return packageResolution(normalized, pkgConfigMatch.pkgName);
@@ -2128,19 +2264,16 @@ hook('normalize', function(normalize) {
     };
   }
 
-  var pkgBundlePromises = {};
-
   // check if the given normalized name matches a packageConfigPath
   // if so, loads the config
   var packageConfigPathsRegExps = {};
-  var pkgConfigPromises = {};
 
   function pkgConfigPathMatch(loader, normalized) {
     var pkgPath, pkgConfigPaths = [];
     for (var i = 0; i < loader.packageConfigPaths.length; i++) {
       var p = loader.packageConfigPaths[i];
       var pPkgLen = Math.max(p.lastIndexOf('*') + 1, p.lastIndexOf('/'));
-      var match = normalized.match(packageConfigPathsRegExps[p] || 
+      var match = normalized.match(packageConfigPathsRegExps[p] ||
           (packageConfigPathsRegExps[p] = new RegExp('^(' + p.substr(0, pPkgLen).replace(/\*/g, '[^\\/]+') + ')(\/|$)')));
       if (match && (!pkgPath || pkgPath == match[1])) {
         pkgPath = match[1];
@@ -2159,8 +2292,8 @@ hook('normalize', function(normalize) {
     if (curPkgConfig && curPkgConfig.configured)
       return Promise.resolve();
 
-    return pkgConfigPromises[pkgConfigMatch.pkgName] || (
-      pkgConfigPromises[pkgConfigMatch.pkgName] = Promise.resolve()
+    return loader._loader.pkgConfigPromises[pkgConfigMatch.pkgName] || (
+      loader._loader.pkgConfigPromises[pkgConfigMatch.pkgName] = Promise.resolve()
       .then(function() {
         var pkgConfigPromises = [];
         for (var i = 0; i < pkgConfigMatch.configPaths.length; i++) (function(pkgConfigPath) {
@@ -2177,6 +2310,12 @@ hook('normalize', function(normalize) {
             // support "systemjs" prefixing
             if (cfg.systemjs)
               cfg = cfg.systemjs;
+
+            // modules backwards compatibility
+            if (cfg.modules) {
+              cfg.meta = cfg.modules;
+              warn.call(loader, 'Package config file ' + pkgConfigPath + ' is configured with "modules", which is deprecated as it has been renamed to "meta".');
+            }
 
             // remove any non-system properties if generic config file (eg package.json)
             for (var p in cfg) {
@@ -2221,7 +2360,7 @@ hook('normalize', function(normalize) {
     return createPackageNormalize(normalize, false);
   });
 
-  function getMetaMatches(pkgMeta, pkgName, subPath, matchFn) {
+  function getMetaMatches(pkgMeta, subPath, matchFn) {
     // wildcard meta
     var meta = {};
     var wildcardIndex;
@@ -2256,7 +2395,7 @@ hook('normalize', function(normalize) {
           var pkg = loader.packages[pkgName];
           var basePath = getBasePath(pkg);
           var subPath = load.name.substr(pkgName.length + basePath.length + 1);
-          
+
           // format
           if (pkg.format)
             load.metadata.format = load.metadata.format || pkg.format;
@@ -2276,7 +2415,7 @@ hook('normalize', function(normalize) {
           var meta = {};
           if (pkg.meta) {
             var bestDepth = 0;
-            getMetaMatches(pkg.meta, pkgName, subPath, function(metaPattern, matchMeta, matchDepth) {
+            getMetaMatches(pkg.meta, subPath, function(metaPattern, matchMeta, matchDepth) {
               if (matchDepth > bestDepth)
                 bestDepth = matchDepth;
               extendMeta(meta, matchMeta, matchDepth && bestDepth > matchDepth);
@@ -2296,7 +2435,8 @@ hook('normalize', function(normalize) {
     };
   });
 
-})();/*
+})();
+/*
  * Script tag fetch
  *
  * When load.metadata.scriptLoad is true, we load via script tag injection.
@@ -2306,29 +2446,89 @@ hook('normalize', function(normalize) {
   if (typeof document != 'undefined')
     var head = document.getElementsByTagName('head')[0];
 
-  // call this functione everytime a wrapper executes
   var curSystem;
-  // System clobbering protection for Traceur
-  SystemJSLoader.prototype.onScriptLoad = function() {
-    __global.System = curSystem;
-  };
+
+  // if doing worker executing, this is set to the load record being executed
+  var workerLoad = null;
+  
+  // interactive mode handling method courtesy RequireJS
+  var ieEvents = head && (function() {
+    var s = document.createElement('script');
+    var isOpera = typeof opera !== 'undefined' && opera.toString() === '[object Opera]';
+    return s.attachEvent && !(s.attachEvent.toString && s.attachEvent.toString().indexOf('[native code') < 0) && !isOpera;
+  })();
+
+  // IE interactive-only part
+  // we store loading scripts array as { script: <script>, load: {...} }
+  var interactiveLoadingScripts = [];
+  var interactiveScript;
+  function getInteractiveScriptLoad() {
+    if (interactiveScript && interactiveScript.script.readyState === 'interactive')
+      return interactiveScript.load;
+
+    for (var i = 0; i < interactiveLoadingScripts.length; i++)
+      if (interactiveLoadingScripts[i].script.readyState == 'interactive') {
+        interactiveScript = interactiveLoadingScripts[i];
+        return interactiveScript.load;
+      }
+  }
+  
+  // System.register, System.registerDynamic, AMD define pipeline
+  // this is called by the above methods when they execute
+  // we then run the reduceRegister_ collection function either immediately
+  // if we are in IE and know the currently executing script (interactive)
+  // or later if we need to wait for the synchronous load callback to know the script
+  var loadingCnt = 0;
+  var registerQueue = [];
+  hook('pushRegister_', function(pushRegister) {
+    return function(register) {
+      // if using eval-execution then skip
+      if (pushRegister.call(this, register))
+        return false;
+
+      // if using worker execution, then we're done
+      if (workerLoad)
+        this.reduceRegister_(workerLoad, register);
+
+      // detect if we know the currently executing load (IE)
+      // if so, immediately call reduceRegister
+      else if (ieEvents)
+        this.reduceRegister_(getInteractiveScriptLoad(), register);
+
+      // otherwise, add to our execution queue
+      // to call reduceRegister on sync script load event
+      else if (loadingCnt)
+        registerQueue.push(register);
+
+      // if we're not currently loading anything though
+      // then do the reduction against a null load
+      // (out of band named define or named register)
+      // note even in non-script environments, this catch is used
+      else
+        this.reduceRegister_(null, register);
+
+      return true;
+    };
+  });
 
   function webWorkerImport(loader, load) {
     return new Promise(function(resolve, reject) {
       if (load.metadata.integrity)
         reject(new Error('Subresource integrity checking is not supported in web workers.'));
 
+      workerLoad = load;
       try {
         importScripts(load.address);
       }
       catch(e) {
+        workerLoad = null;
         reject(e);
       }
+      workerLoad = null;
 
-      loader.onScriptLoad(load);
       // if nothing registered, then something went wrong
-      if (!load.metadata.registered)
-        reject(load.address + ' did not call System.register or AMD define');
+      if (!load.metadata.entry)
+        reject(new Error(load.address + ' did not call System.register or AMD define'));
 
       resolve('');
     });
@@ -2347,21 +2547,53 @@ hook('normalize', function(normalize) {
 
       return new Promise(function(resolve, reject) {
         var s = document.createElement('script');
+        
         s.async = true;
+        
+        if (load.metadata.integrity)
+          s.setAttribute('integrity', load.metadata.integrity);
+
+        if (ieEvents) {
+          s.attachEvent('onreadystatechange', complete);
+          interactiveLoadingScripts.push({
+            script: s,
+            load: load
+          });
+        }
+        else {
+          s.addEventListener('load', complete, false);
+          s.addEventListener('error', error, false);
+        }
+
+        loadingCnt++;
+
+        curSystem = __global.System;
+
+        s.src = load.address;
+        head.appendChild(s);
 
         function complete(evt) {
           if (s.readyState && s.readyState != 'loaded' && s.readyState != 'complete')
             return;
+
+          loadingCnt--;
+
+          // complete call is sync on execution finish
+          // (in ie already done reductions)
+          if (!load.metadata.entry && !registerQueue.length) {
+            loader.reduceRegister_(load);
+          }
+          else if (!ieEvents) {
+            for (var i = 0; i < registerQueue.length; i++)
+              loader.reduceRegister_(load, registerQueue[i]);
+            registerQueue = [];
+          }
+
           cleanup();
 
-          // this runs synchronously after execution
-          // we now need to tell the wrapper handlers that
-          // this load record has just executed
-          loader.onScriptLoad(load);
-
           // if nothing registered, then something went wrong
-          if (!load.metadata.registered)
-            reject(load.address + ' did not call System.register or AMD define');
+          if (!load.metadata.entry && !load.metadata.bundle)
+            reject(new Error(load.name + ' did not call System.register or AMD define. If loading a global module configure the global name via the meta exports property for script injection support.'));
 
           resolve('');
         }
@@ -2371,30 +2603,23 @@ hook('normalize', function(normalize) {
           reject(new Error('Unable to load script ' + load.address));
         }
 
-        if (s.attachEvent) {
-          s.attachEvent('onreadystatechange', complete);
-        }
-        else {
-          s.addEventListener('load', complete, false);
-          s.addEventListener('error', error, false);
-        }
-
-        curSystem = __global.System;
-        __global.System = loader;
-        s.src = load.address;
-
-        if (load.metadata.integrity)
-          s.setAttribute('integrity', load.metadata.integrity);
-
-        head.appendChild(s);
-
         function cleanup() {
-          if (s.detachEvent)
+          __global.System = curSystem;
+
+          if (s.detachEvent) {
             s.detachEvent('onreadystatechange', complete);
+            for (var i = 0; i < interactiveLoadingScripts.length; i++)
+              if (interactiveLoadingScripts[i].script == s) {
+                if (interactiveScript && interactiveScript.script == s)
+                  interactiveScript = null;
+                interactiveLoadingScripts.splice(i, 1);
+              }
+          }
           else {
             s.removeEventListener('load', complete, false);
             s.removeEventListener('error', error, false);
           }
+
           head.removeChild(s);
         }
       });
@@ -2417,6 +2642,59 @@ hook('normalize', function(normalize) {
  * and CommonJS, identically to the actual ES6 loader.
  *
  */
+
+
+/*
+ * Registry side table entries in loader.defined
+ * Registry Entry Contains:
+ *    - name
+ *    - deps 
+ *    - declare for declarative modules
+ *    - execute for dynamic modules, different to declarative execute on module
+ *    - executingRequire indicates require drives execution for circularity of dynamic modules
+ *    - declarative optional boolean indicating which of the above
+ *
+ * Can preload modules directly on System.defined['my/module'] = { deps, execute, executingRequire }
+ *
+ * Then the entry gets populated with derived information during processing:
+ *    - normalizedDeps derived from deps, created in instantiate
+ *    - groupIndex used by group linking algorithm
+ *    - evaluated indicating whether evaluation has happend
+ *    - module the module record object, containing:
+ *      - exports actual module exports
+ *
+ *    For dynamic we track the es module with:
+ *    - esModule actual es module value
+ *    - esmExports whether to extend the esModule with named exports
+ *      
+ *    Then for declarative only we track dynamic bindings with the 'module' records:
+ *      - name
+ *      - exports
+ *      - setters declarative setter functions
+ *      - dependencies, module records of dependencies
+ *      - importers, module records of dependents
+ *
+ * After linked and evaluated, entries are removed, declarative module records remain in separate
+ * module binding table
+ *
+ */
+function createEntry() {
+  return {
+    name: null,
+    deps: null,
+    declare: null,
+    execute: null,
+    executingRequire: false,
+    declarative: false,
+    normalizedDeps: null,
+    groupIndex: null,
+    evaluated: false,
+    module: null,
+    esModule: null,
+    esmExports: false
+  };
+}
+
 (function() {
 
   /*
@@ -2431,28 +2709,6 @@ hook('normalize', function(normalize) {
    * allowing compiled ES6 circular references to work alongside AMD and CJS circular references.
    *
    */
-  var anonRegister;
-  var calledRegister = false;
-  function doRegister(loader, name, register) {
-    calledRegister = true;
-
-    // named register
-    if (name) {
-      // ideally wouldn't apply map config to bundle names but 
-      // dependencies go through map regardless so we can't restrict
-      // could reconsider in shift to new spec
-      name = (loader.normalizeSync || loader.normalize).call(loader, name);
-      register.name = name;
-      if (!(name in loader.defined))
-        loader.defined[name] = register; 
-    }
-    // anonymous register
-    else {
-      if (anonRegister)
-        throw new TypeError('Invalid anonymous System.register module load. If loading a single module, ensure anonymous System.register is loaded via System.import. If loading a bundle, ensure all the System.register calls are named.');
-      anonRegister = register;
-    }
-  }
   SystemJSLoader.prototype.register = function(name, deps, declare) {
     if (typeof name != 'string') {
       declare = deps;
@@ -2465,10 +2721,18 @@ hook('normalize', function(normalize) {
     if (typeof declare == 'boolean')
       return this.registerDynamic.apply(this, arguments);
 
-    doRegister(this, name, {
-      declarative: true,
-      deps: deps,
-      declare: declare
+    var entry = createEntry();
+    // ideally wouldn't apply map config to bundle names but 
+    // dependencies go through map regardless so we can't restrict
+    // could reconsider in shift to new spec
+    entry.name = name && (this.normalizeSync || this.normalize).call(this, name);
+    entry.declarative = true;
+    entry.deps = deps;
+    entry.declare = declare;
+
+    this.pushRegister_({
+      amd: false,
+      entry: entry
     });
   };
   SystemJSLoader.prototype.registerDynamic = function(name, deps, declare, execute) {
@@ -2480,71 +2744,56 @@ hook('normalize', function(normalize) {
     }
 
     // dynamic
-    doRegister(this, name, {
-      declarative: false,
-      deps: deps,
-      execute: execute,
-      executingRequire: declare
+    var entry = createEntry();
+    entry.name = name && (this.normalizeSync || this.normalize).call(this, name);
+    entry.deps = deps;
+    entry.execute = execute;
+    entry.executingRequire = declare;
+
+    this.pushRegister_({
+      amd: false,
+      entry: entry
     });
   };
-  /*
-   * Registry side table - loader.defined
-   * Registry Entry Contains:
-   *    - name
-   *    - deps 
-   *    - declare for declarative modules
-   *    - execute for dynamic modules, different to declarative execute on module
-   *    - executingRequire indicates require drives execution for circularity of dynamic modules
-   *    - declarative optional boolean indicating which of the above
-   *
-   * Can preload modules directly on System.defined['my/module'] = { deps, execute, executingRequire }
-   *
-   * Then the entry gets populated with derived information during processing:
-   *    - normalizedDeps derived from deps, created in instantiate
-   *    - groupIndex used by group linking algorithm
-   *    - evaluated indicating whether evaluation has happend
-   *    - module the module record object, containing:
-   *      - exports actual module exports
-   *
-   *    For dynamic we track the es module with:
-   *    - esModule actual es module value
-   *    - esmExports whether to extend the esModule with named exports
-   *      
-   *    Then for declarative only we track dynamic bindings with the 'module' records:
-   *      - name
-   *      - exports
-   *      - setters declarative setter functions
-   *      - dependencies, module records of dependencies
-   *      - importers, module records of dependents
-   *
-   * After linked and evaluated, entries are removed, declarative module records remain in separate
-   * module binding table
-   *
-   */
+  hook('reduceRegister_', function() {
+    return function(load, register) {
+      if (!register)
+        return;
+
+      var entry = register.entry;
+      var curMeta = load && load.metadata;
+
+      // named register
+      if (entry.name) {
+        if (!(entry.name in this.defined))
+          this.defined[entry.name] = entry;
+
+        if (curMeta)
+          curMeta.bundle = true;
+      }
+      // anonymous register
+      if (!entry.name || load && entry.name == load.name) {
+        if (!curMeta)
+          throw new TypeError('Unexpected anonymous System.register call.');
+        if (curMeta.entry) {
+          if (curMeta.format == 'register')
+            throw new Error('Multiple anonymous System.register calls in module ' + load.name + '. If loading a bundle, ensure all the System.register calls are named.');
+          else
+            throw new Error('Module ' + load.name + ' interpreted as ' + curMeta.format + ' module format, but called System.register.');
+        }
+        if (!curMeta.format)
+          curMeta.format = 'register';
+        curMeta.entry = entry;
+      }
+    };
+  });
+
   hookConstructor(function(constructor) {
     return function() {
       constructor.call(this);
 
       this.defined = {};
       this._loader.moduleRecords = {};
-    };
-  });
-
-  // script injection mode calls this function synchronously on load
-  hook('onScriptLoad', function(onScriptLoad) {
-    return function(load) {
-      onScriptLoad.call(this, load);
-
-      if (calledRegister) {
-        // anonymous define
-        if (anonRegister)
-          load.metadata.entry = anonRegister;
-
-        load.metadata.format = load.metadata.format || 'defined';
-        load.metadata.registered = true;
-        calledRegister = false;
-        anonRegister = null;
-      }
     };
   });
 
@@ -2568,15 +2817,15 @@ hook('normalize', function(normalize) {
       var depGroupIndex = entry.groupIndex + (depEntry.declarative != entry.declarative);
 
       // the group index of an entry is always the maximum
-      if (depEntry.groupIndex === undefined || depEntry.groupIndex < depGroupIndex) {
+      if (depEntry.groupIndex === null || depEntry.groupIndex < depGroupIndex) {
         
         // if already in a group, remove from the old group
-        if (depEntry.groupIndex !== undefined) {
+        if (depEntry.groupIndex !== null) {
           groups[depEntry.groupIndex].splice(indexOf.call(groups[depEntry.groupIndex], depEntry), 1);
 
           // if the old group is empty, then we have a mixed depndency cycle
           if (groups[depEntry.groupIndex].length == 0)
-            throw new TypeError("Mixed dependency cycle detected");
+            throw new Error("Mixed dependency cycle detected");
         }
 
         depEntry.groupIndex = depGroupIndex;
@@ -2662,7 +2911,7 @@ hook('normalize', function(normalize) {
 
       module.locked = false;
       return value;
-    });
+    }, entry.name);
     
     module.setters = declaration.setters;
     module.execute = declaration.execute;
@@ -2772,7 +3021,7 @@ hook('normalize', function(normalize) {
           continue;
         return getModule(entry.normalizedDeps[i], loader);
       }
-      throw new TypeError('Module ' + name + ' not declared as a dependency.');
+      throw new Error('Module ' + name + ' not declared as a dependency.');
     }, exports, module);
     
     if (output)
@@ -2785,7 +3034,7 @@ hook('normalize', function(normalize) {
     if (exports && exports.__esModule)
       entry.esModule = exports;
     // set module as 'default' export, then fake named exports by iterating properties
-    else if (entry.esmExports)
+    else if (entry.esmExports && exports !== __global)
       entry.esModule = getESModule(exports);
     // just use the 'default' export
     else
@@ -2851,14 +3100,9 @@ hook('normalize', function(normalize) {
         return '';
       }
       
-      // this is the synchronous chain for onScriptLoad
-      anonRegister = null;
-      calledRegister = false;
-      
-      if (load.metadata.format == 'register' && !load.metadata.authorization)
+      if (load.metadata.format == 'register' && !load.metadata.authorization && load.metadata.scriptLoad !== false)
         load.metadata.scriptLoad = true;
 
-      // NB remove when "deps " is deprecated
       load.metadata.deps = load.metadata.deps || [];
       
       return fetch.call(this, load);
@@ -2868,12 +3112,8 @@ hook('normalize', function(normalize) {
   hook('translate', function(translate) {
     // we run the meta detection here (register is after meta)
     return function(load) {
+      load.metadata.deps = load.metadata.deps || [];
       return Promise.resolve(translate.call(this, load)).then(function(source) {
-
-        if (typeof load.metadata.deps === 'string')
-          load.metadata.deps = load.metadata.deps.split(',');
-        load.metadata.deps = load.metadata.deps || [];
-
         // run detection for register format
         if (load.metadata.format == 'register' || !load.metadata.format && detectRegisterFormat(load.source))
           load.metadata.format = 'register';
@@ -2894,54 +3134,37 @@ hook('normalize', function(normalize) {
         entry.deps = entry.deps.concat(load.metadata.deps);
       }
 
-      // picked up already by a script injection
-      else if (load.metadata.entry)
+      // picked up already by an anonymous System.register script injection
+      // or via the dynamic formats
+      else if (load.metadata.entry) {
         entry = load.metadata.entry;
-
-      // otherwise check if it is dynamic
-      else if (load.metadata.execute) {
-        entry = {
-          declarative: false,
-          deps: load.metadata.deps || [],
-          execute: load.metadata.execute,
-          executingRequire: load.metadata.executingRequire // NodeJS-style requires or not
-        };
+        entry.deps = entry.deps.concat(load.metadata.deps);
       }
 
       // Contains System.register calls
       // (dont run bundles in the builder)
       else if (!(loader.builder && load.metadata.bundle) 
           && (load.metadata.format == 'register' || load.metadata.format == 'esm' || load.metadata.format == 'es6')) {
-        anonRegister = null;
-        calledRegister = false;
-
+        
         if (typeof __exec != 'undefined')
           __exec.call(loader, load);
 
-        if (!calledRegister && !load.metadata.registered)
-          throw new TypeError(load.name + ' detected as System.register but didn\'t execute.');
+        if (!load.metadata.entry && !load.metadata.bundle)
+          throw new Error(load.name + ' detected as ' + load.metadata.format + ' but didn\'t execute.');
 
-        if (anonRegister)
-          entry = anonRegister;
-        else
-          load.metadata.bundle = true;
+        entry = load.metadata.entry;
 
-        if (!entry && loader.defined[load.name])
-          entry = loader.defined[load.name];
-
-        anonRegister = null;
-        calledRegister = false;
+        // support metadata deps for System.register
+        if (entry && load.metadata.deps)
+          entry.deps = entry.deps.concat(load.metadata.deps);
       }
 
       // named bundles are just an empty module
-      if (!entry)
-        entry = {
-          declarative: false,
-          deps: load.metadata.deps,
-          execute: function() {
-            return loader.newModule({});
-          }
-        };
+      if (!entry) {
+        entry = createEntry();
+        entry.deps = load.metadata.deps;
+        entry.execute = function() {};
+      }
 
       // place this module onto defined for circular references
       loader.defined[load.name] = entry;
@@ -2999,19 +3222,24 @@ hook('normalize', function(normalize) {
       return translate.call(loader, load)
       .then(function(source) {
         // detect & transpile ES6
-        if (load.metadata.format == 'esm' || load.metadata.format == 'es6' || !load.metadata.format && source.match(esmRegEx)) {
+        if (load.metadata.format == 'esm' || load.metadata.format == 'es6' || !load.metadata.format && loader.transpiler !== false && source.match(esmRegEx)) {
           if (load.metadata.format == 'es6')
             warn.call(loader, 'Module ' + load.name + ' has metadata setting its format to "es6", which is deprecated.\nThis should be updated to "esm".');
+
           load.metadata.format = 'esm';
 
-          if (loader.transpiler === false)
+          if (loader.transpiler === false) {
+            // we accept translation to esm for builds though to enable eg rollup optimizations
+            if (loader.builder)
+              return source;
             throw new TypeError('Unable to dynamically transpile ES module as System.transpiler set to false.');
+          }
 
-          // setting _loadedTranspiler = false tells the next block to
+          // setting loadedTranspiler_ = false tells the next block to
           // do checks for setting transpiler metadata
-          loader._loadedTranspiler = loader._loadedTranspiler || false;
+          loader.loadedTranspiler_ = loader.loadedTranspiler_ || false;
           if (loader.pluginLoader)
-            loader.pluginLoader._loadedTranspiler = loader._loadedTranspiler || false;
+            loader.pluginLoader.loadedTranspiler_ = loader.loadedTranspiler_ || false;
 
           // builder support
           if (loader.builder)
@@ -3026,8 +3254,14 @@ hook('normalize', function(normalize) {
           });
         }
 
+        // skip transpiler and transpiler runtime loading when transpiler is disabled
+        if (loader.transpiler === false)
+          return source;
+
         // load the transpiler correctly
-        if (loader._loadedTranspiler === false && load.name == loader.normalizeSync(loader.transpiler)) {
+        if (loader.loadedTranspiler_ === false && load.name == loader.normalizeSync(loader.transpiler)) {
+          warn.call(loader, 'Note that internal transpilation via System.transpiler has been deprecated for transpiler plugins.');
+
           // always load transpiler as a global
           if (source.length > 100) {
             load.metadata.format = load.metadata.format || 'global';
@@ -3038,30 +3272,30 @@ hook('normalize', function(normalize) {
               load.metadata.exports = 'ts';
           }
 
-          loader._loadedTranspiler = true;
+          loader.loadedTranspiler_ = true;
         }
 
         // load the transpiler runtime correctly
-        if (loader._loadedTranspilerRuntime === false) {
+        if (loader.loadedTranspilerRuntime_ === false) {
           if (load.name == loader.normalizeSync('traceur-runtime')
               || load.name == loader.normalizeSync('babel/external-helpers*')) {
             if (source.length > 100)
               load.metadata.format = load.metadata.format || 'global';
 
-            loader._loadedTranspilerRuntime = true;
+            loader.loadedTranspilerRuntime_ = true;
           }
         }
 
         // detect transpiler runtime usage to load runtimes
-        if (load.metadata.format == 'register' && loader._loadedTranspilerRuntime !== true) {
+        if ((load.metadata.format == 'register' || load.metadata.bundle) && loader.loadedTranspilerRuntime_ !== true) {
           if (!__global.$traceurRuntime && load.source.match(traceurRuntimeRegEx)) {
-            loader._loadedTranspilerRuntime = loader._loadedTranspilerRuntime || false;
+            loader.loadedTranspilerRuntime_ = loader.loadedTranspilerRuntime_ || false;
             return loader['import']('traceur-runtime').then(function() {
               return source;
             });
           }
           if (!__global.babelHelpers && load.source.match(babelHelpersRegEx)) {
-            loader._loadedTranspilerRuntime = loader._loadedTranspilerRuntime || false;
+            loader.loadedTranspilerRuntime_ = loader.loadedTranspilerRuntime_ || false;
             return loader['import']('babel/external-helpers').then(function() {
               return source;
             });
@@ -3086,29 +3320,17 @@ hook('normalize', function(normalize) {
 */
 var __globalName = typeof self != 'undefined' ? 'self' : 'global';
 
-hook('onScriptLoad', function(onScriptLoad) {
-  return function(load) {
-    if (load.metadata.format == 'global') {
-      load.metadata.registered = true;
-      var globalValue = readMemberExpression(load.metadata.exports, __global);
-      load.metadata.execute = function() {
-        return globalValue;
-      }
-    }
-    return onScriptLoad.call(this, load);
-  };
-});
-
 hook('fetch', function(fetch) {
   return function(load) {
-    if (load.metadata.exports)
+    if (load.metadata.exports && !load.metadata.format)
       load.metadata.format = 'global';
 
     // A global with exports, no globals and no deps
     // can be loaded via a script tag
     if (load.metadata.format == 'global' && !load.metadata.authorization
         && load.metadata.exports && !load.metadata.globals 
-        && (!load.metadata.deps || load.metadata.deps.length == 0))
+        && (!load.metadata.deps || load.metadata.deps.length == 0)
+        && load.metadata.scriptLoad !== false)
       load.metadata.scriptLoad = true;
 
     return fetch.call(this, load);
@@ -3119,8 +3341,6 @@ hook('fetch', function(fetch) {
 // we can't do it with AMD support side-by-side since AMD support means defining the
 // global define, and global support means not definining it, yet we don't have any hook
 // into the "pre-execution" phase of a script tag being loaded to handle both cases
-
-
 hook('instantiate', function(instantiate) {
   return function(load) {
     var loader = this;
@@ -3128,30 +3348,26 @@ hook('instantiate', function(instantiate) {
     if (!load.metadata.format)
       load.metadata.format = 'global';
 
-    // globals shorthand support for:
-    // globals = ['Buffer'] where we just require 'Buffer' in the current context
-    if (load.metadata.globals) {
-      if (load.metadata.globals instanceof Array) {
-        var globals = {};
-        for (var i = 0; i < load.metadata.globals.length; i++)
-          globals[load.metadata.globals[i]] = load.metadata.globals[i];
-        load.metadata.globals = globals;
-      }
-    }
-
     // global is a fallback module format
     if (load.metadata.format == 'global' && !load.metadata.registered) {
 
-      for (var g in load.metadata.globals)
-        load.metadata.deps.push(load.metadata.globals[g]);
+      var entry = createEntry();
 
-      load.metadata.execute = function(require, exports, module) {
+      load.metadata.entry = entry;
+
+      entry.deps = [];
+
+      for (var g in load.metadata.globals)
+        entry.deps.push(load.metadata.globals[g]);
+
+      entry.execute = function(require, exports, module) {
 
         var globals;
         if (load.metadata.globals) {
           globals = {};
           for (var g in load.metadata.globals)
-            globals[g] = require(load.metadata.globals[g]);
+            if (load.metadata.globals[g])
+              globals[g] = require(load.metadata.globals[g]);
         }
         
         var exportName = load.metadata.exports;
@@ -3169,6 +3385,21 @@ hook('instantiate', function(instantiate) {
     return instantiate.call(this, load);
   };
 });
+hook('reduceRegister_', function(reduceRegister) {
+  return function(load, register) {
+    if (register || !load.metadata.exports)
+      return reduceRegister.call(this, load, register);
+
+    load.metadata.format = 'global';
+    var entry = load.metadata.entry = createEntry();
+    entry.deps = load.metadata.deps;
+    var globalValue = readMemberExpression(load.metadata.exports, __global);
+    entry.execute = function() {
+      return globalValue;
+    };
+  };
+});
+
 hookConstructor(function(constructor) {
   return function() {
     var loader = this;
@@ -3177,7 +3408,7 @@ hookConstructor(function(constructor) {
     var hasOwnProperty = Object.prototype.hasOwnProperty;
 
     // bare minimum ignores for IE8
-    var ignoredGlobalProps = ['_g', 'sessionStorage', 'localStorage', 'clipboardData', 'frames', 'external', 'mozAnimationStartTime', 'webkitStorageInfo', 'webkitIndexedDB'];
+    var ignoredGlobalProps = ['_g', 'sessionStorage', 'localStorage', 'clipboardData', 'frames', 'frameElement', 'external', 'mozAnimationStartTime', 'webkitStorageInfo', 'webkitIndexedDB'];
 
     var globalSnapshot;
 
@@ -3221,7 +3452,7 @@ hookConstructor(function(constructor) {
         if (globals) {
           oldGlobals = {};
           for (var g in globals) {
-            oldGlobals[g] = globals[g];
+            oldGlobals[g] = __global[g];
             __global[g] = globals[g];
           }
         }
@@ -3284,41 +3515,63 @@ hookConstructor(function(constructor) {
 (function() {
   // CJS Module Format
   // require('...') || exports[''] = ... || exports.asd = ... || module.exports = ...
-  var cjsExportsRegEx = /(?:^\uFEFF?|[^$_a-zA-Z\xA0-\uFFFF.]|module\.)exports\s*(\[['"]|\.)|(?:^\uFEFF?|[^$_a-zA-Z\xA0-\uFFFF.])module\.exports\s*[=,]/;
+  var cjsExportsRegEx = /(?:^\uFEFF?|[^$_a-zA-Z\xA0-\uFFFF.])(exports\s*(\[['"]|\.)|module(\.exports|\['exports'\]|\["exports"\])\s*(\[['"]|[=,\.]))/;
   // RegEx adjusted from https://github.com/jbrantly/yabble/blob/master/lib/yabble.js#L339
   var cjsRequireRegEx = /(?:^\uFEFF?|[^$_a-zA-Z\xA0-\uFFFF."'])require\s*\(\s*("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')\s*\)/g;
-  var commentRegEx = /(\/\*([\s\S]*?)\*\/|([^:]|^)\/\/(.*)$)/mg;
+  var commentRegEx = /(^|[^\\])(\/\*([\s\S]*?)\*\/|([^:]|^)\/\/(.*)$)/mg;
+
+  var stringRegEx = /("[^"\\\n\r]*(\\.[^"\\\n\r]*)*"|'[^'\\\n\r]*(\\.[^'\\\n\r]*)*')/g;
 
   function getCJSDeps(source) {
-    cjsRequireRegEx.lastIndex = commentRegEx.lastIndex = 0;
+    cjsRequireRegEx.lastIndex = commentRegEx.lastIndex = stringRegEx.lastIndex = 0;
 
     var deps = [];
 
-    // track comments in the source
     var match;
-    
-    var commentLocations = [];
+
+    // track string and comment locations for unminified source    
+    var stringLocations = [], commentLocations = [];
+
+    function inLocation(locations, match) {
+      for (var i = 0; i < locations.length; i++)
+        if (locations[i][0] < match.index && locations[i][1] > match.index)
+          return true;
+      return false;
+    }
+
     if (source.length / source.split('\n').length < 200) {
-      while (match = commentRegEx.exec(source))
-        commentLocations.push([match.index, match.index + match[0].length]);
+      while (match = stringRegEx.exec(source))
+        stringLocations.push([match.index, match.index + match[0].length]);
+      
+      while (match = commentRegEx.exec(source)) {
+        // only track comments not starting in strings
+        if (!inLocation(stringLocations, match))
+          commentLocations.push([match.index, match.index + match[0].length]);
+      }
     }
 
     while (match = cjsRequireRegEx.exec(source)) {
-      // ensure we're not in a comment location
-      var inComment = false;
-      for (var i = 0; i < commentLocations.length; i++) {
-        if (commentLocations[i][0] < match.index && commentLocations[i][1] > match.index + match[0].length)
-          inComment = true;
+      // ensure we're not within a string or comment location
+      if (!inLocation(stringLocations, match) && !inLocation(commentLocations, match)) {
+        var dep = match[1].substr(1, match[1].length - 2);
+        // skip cases like require('" + file + "')
+        if (dep.match(/"|'/))
+          continue;
+        // trailing slash requires are removed as they don't map mains in SystemJS
+        if (dep[dep.length - 1] == '/')
+          dep = dep.substr(0, dep.length - 1);
+        deps.push(dep);
       }
-      if (!inComment)
-        deps.push(match[1].substr(1, match[1].length - 2));
     }
 
     return deps;
   }
 
-  if (typeof window != 'undefined' && typeof document != 'undefined' && window.location)
-    var windowOrigin = location.protocol + '//' + location.hostname + (location.port ? ':' + location.port : '');
+  hook('normalize', function(normalize) {
+    return function(name, parentName) {
+      return normalize.apply(this, arguments);
+    };
+  });
 
   hook('instantiate', function(instantiate) {
     return function(load) {
@@ -3331,46 +3584,39 @@ hookConstructor(function(constructor) {
       }
 
       if (load.metadata.format == 'cjs') {
-        var metaDeps = load.metadata.deps || [];
-        load.metadata.deps = metaDeps.concat(getCJSDeps(load.source));
+        var metaDeps = load.metadata.deps;
+        var deps = load.metadata.cjsRequireDetection === false ? [] : getCJSDeps(load.source);
 
         for (var g in load.metadata.globals)
-          load.metadata.deps.push(load.metadata.globals[g]);
+          if (load.metadata.globals[g])
+            deps.push(load.metadata.globals[g]);
 
-        load.metadata.executingRequire = true;
+        var entry = createEntry();
 
-        load.metadata.execute = function(require, exports, module) {
+        load.metadata.entry = entry;
+
+        entry.deps = deps;
+        entry.executingRequire = true;
+        entry.execute = function(_require, exports, module) {
+          function require(name) {
+            if (name[name.length - 1] == '/')
+              name = name.substr(0, name.length - 1);
+            return _require.apply(this, arguments);
+          }
+
           // ensure meta deps execute first
           for (var i = 0; i < metaDeps.length; i++)
             require(metaDeps[i]);
-          var address = load.address || '';
-
-          var dirname = address.split('/');
-          dirname.pop();
-          dirname = dirname.join('/');
-
-          if (address.substr(0, 8) == 'file:///') {
-            address = address.substr(7);
-            dirname = dirname.substr(7);
-
-            // on windows remove leading '/'
-            if (isWindows) {
-              address = address.substr(1);
-              dirname = dirname.substr(1);
-            }
-          }
-          else if (windowOrigin && address.substr(0, windowOrigin.length) === windowOrigin) {
-            address = address.substr(windowOrigin.length);
-            dirname = dirname.substr(windowOrigin.length);
-          }
 
           // disable AMD detection
           var define = __global.define;
           __global.define = undefined;
 
+          var pathVars = loader.get('@@cjs-helpers').getPathVars(module.id);
+
           __global.__cjsWrapper = {
             exports: exports,
-            args: [require, exports, module, address, dirname, __global, __global]
+            args: [require, exports, module, pathVars.filename, pathVars.dirname, __global, __global]
           };
 
           var globals = '';
@@ -3393,10 +3639,54 @@ hookConstructor(function(constructor) {
     };
   });
 })();
-/*
+hookConstructor(function(constructor) {
+  return function() {
+    var loader = this;
+    constructor.call(loader);
+
+    if (typeof window != 'undefined' && typeof document != 'undefined' && window.location)
+      var windowOrigin = location.protocol + '//' + location.hostname + (location.port ? ':' + location.port : '');
+
+    loader.set('@@cjs-helpers', loader.newModule({
+      getPathVars: function(moduleId) {
+        // remove any plugin syntax
+        var pluginIndex = moduleId.lastIndexOf('!');
+        var filename;
+        if (pluginIndex != -1)
+          filename = moduleId.substr(0, pluginIndex);
+        else
+          filename = moduleId;
+
+        var dirname = filename.split('/');
+        dirname.pop();
+        dirname = dirname.join('/');
+
+        if (filename.substr(0, 8) == 'file:///') {
+          filename = filename.substr(7);
+          dirname = dirname.substr(7);
+
+          // on windows remove leading '/'
+          if (isWindows) {
+            filename = filename.substr(1);
+            dirname = dirname.substr(1);
+          }
+        }
+        else if (windowOrigin && filename.substr(0, windowOrigin.length) === windowOrigin) {
+          filename = filename.substr(windowOrigin.length);
+          dirname = dirname.substr(windowOrigin.length);
+        }
+
+        return {
+          filename: filename,
+          dirname: dirname
+        };
+      }
+    }))
+  };
+});/*
  * AMD Helper function module
  * Separated into its own file as this is the part needed for full AMD support in SFX builds
- *
+ * NB since implementations have now diverged this can be merged back with amd.js
  */
 hookConstructor(function(constructor) {
   return function() {
@@ -3507,102 +3797,118 @@ hookConstructor(function(constructor) {
       if ((moduleIndex = indexOf.call(deps, 'module')) != -1)
         deps.splice(moduleIndex, 1);
 
-      var define = {
-        name: name,
-        deps: deps,
-        execute: function(req, exports, module) {
+      function execute(req, exports, module) {
+        var depValues = [];
+        for (var i = 0; i < deps.length; i++)
+          depValues.push(req(deps[i]));
 
-          var depValues = [];
-          for (var i = 0; i < deps.length; i++)
-            depValues.push(req(deps[i]));
+        module.uri = module.id;
 
-          module.uri = module.id;
+        module.config = function() {};
 
-          module.config = function() {};
-
-          // add back in system dependencies
-          if (moduleIndex != -1)
-            depValues.splice(moduleIndex, 0, module);
-          
-          if (exportsIndex != -1)
-            depValues.splice(exportsIndex, 0, exports);
-          
-          if (requireIndex != -1) {
-            function contextualRequire(names, callback, errback) {
-              if (typeof names == 'string' && typeof callback != 'function')
-                return req(names);
-              return require.call(loader, names, callback, errback, module.id);
-            }
-            contextualRequire.toUrl = function(name) {
-              // normalize without defaultJSExtensions
-              var defaultJSExtension = loader.defaultJSExtensions && name.substr(name.length - 3, 3) != '.js';
-              var url = loader.normalizeSync(name, module.id);
-              if (defaultJSExtension && url.substr(url.length - 3, 3) == '.js')
-                url = url.substr(0, url.length - 3);
-              return url;
-            };
-            depValues.splice(requireIndex, 0, contextualRequire);
+        // add back in system dependencies
+        if (moduleIndex != -1)
+          depValues.splice(moduleIndex, 0, module);
+        
+        if (exportsIndex != -1)
+          depValues.splice(exportsIndex, 0, exports);
+        
+        if (requireIndex != -1) {
+          function contextualRequire(names, callback, errback) {
+            if (typeof names == 'string' && typeof callback != 'function')
+              return req(names);
+            return require.call(loader, names, callback, errback, module.id);
           }
-
-          // set global require to AMD require
-          var curRequire = __global.require;
-          __global.require = require;
-
-          var output = factory.apply(exportsIndex == -1 ? __global : exports, depValues);
-
-          __global.require = curRequire;
-
-          if (typeof output == 'undefined' && module)
-            output = module.exports;
-
-          if (typeof output != 'undefined')
-            return output;
+          contextualRequire.toUrl = function(name) {
+            // normalize without defaultJSExtensions
+            var defaultJSExtension = loader.defaultJSExtensions && name.substr(name.length - 3, 3) != '.js';
+            var url = loader.normalizeSync(name, module.id);
+            if (defaultJSExtension && url.substr(url.length - 3, 3) == '.js')
+              url = url.substr(0, url.length - 3);
+            return url;
+          };
+          depValues.splice(requireIndex, 0, contextualRequire);
         }
-      };
 
-      // anonymous define
-      if (!name) {
-        // already defined anonymously -> throw
-        if (lastModule.anonDefine)
-          throw new TypeError('Multiple defines for anonymous module');
-        lastModule.anonDefine = define;
+        // set global require to AMD require
+        var curRequire = __global.require;
+        __global.require = require;
+
+        var output = factory.apply(exportsIndex == -1 ? __global : exports, depValues);
+
+        __global.require = curRequire;
+
+        if (typeof output == 'undefined' && module)
+          output = module.exports;
+
+        if (typeof output != 'undefined')
+          return output;
       }
-      // named define
-      else {
-        // if we don't have any other defines, 
-        // then let this be an anonymous define
-        // this is just to support single modules of the form:
-        // define('jquery')
-        // still loading anonymously
-        // because it is done widely enough to be useful
-        if (!lastModule.anonDefine && !lastModule.isBundle) {
-          lastModule.anonDefine = define;
-        }
-        // otherwise its a bundle only
-        else {
-          // if there is an anonDefine already (we thought it could have had a single named define)
-          // then we define it now
-          // this is to avoid defining named defines when they are actually anonymous
-          if (lastModule.anonDefine && lastModule.anonDefine.name)
-            loader.registerDynamic(lastModule.anonDefine.name, lastModule.anonDefine.deps, false, lastModule.anonDefine.execute);
 
-          lastModule.anonDefine = null;
-        }
+      var entry = createEntry();
+      entry.name = name && (loader.normalizeSync || loader.normalize).call(loader, name);
+      entry.deps = deps;
+      entry.execute = execute;
 
-        // note this is now a bundle
-        lastModule.isBundle = true;
-
-        // define the module through the register registry
-        loader.registerDynamic(name, define.deps, false, define.execute);
-      }
+      loader.pushRegister_({
+        amd: true,
+        entry: entry
+      });
     }
     define.amd = {};
 
-    // adds define as a global (potentially just temporarily)
-    function createDefine(loader) {
-      lastModule.anonDefine = null;
-      lastModule.isBundle = false;
+    // reduction function to attach defines to a load record
+    hook('reduceRegister_', function(reduceRegister) {
+      return function(load, register) {
+        // only handle AMD registers here
+        if (!register || !register.amd)
+          return reduceRegister.call(this, load, register);
 
+        var curMeta = load && load.metadata;
+        var entry = register.entry;
+
+        if (curMeta)
+          curMeta.format = 'amd';
+
+        // anonymous define
+        if (!entry.name) {
+          if (!curMeta)
+            throw new TypeError('Unexpected anonymous AMD define.');
+
+          // already defined anonymously -> throw
+          if (curMeta.entry)
+            throw new TypeError('Multiple defines for anonymous module ' + load.name);
+          
+          curMeta.entry = entry;
+        }
+        // named define
+        else {
+          // if we don't have any other defines, 
+          // then let this be an anonymous define
+          // this is just to support single modules of the form:
+          // define('jquery')
+          // still loading anonymously
+          // because it is done widely enough to be useful
+          // as soon as there is more than one define, this gets removed though
+          if (curMeta) {
+            if (!curMeta.entry && !curMeta.bundle)
+              curMeta.entry = entry;
+            else
+              curMeta.entry = undefined;
+
+            // note this is now a bundle
+            curMeta.bundle = true;
+          }
+
+          // define the module through the register registry
+          if (!(entry.name in this.defined))
+            this.defined[entry.name] = entry;
+        }
+      };
+    });
+
+    // adds define as a global (potentially just temporarily)
+    function createDefine() {
       // ensure no NodeJS environment detection
       var oldModule = __global.module;
       var oldExports = __global.exports;
@@ -3619,16 +3925,10 @@ hookConstructor(function(constructor) {
       };
     }
 
-    var lastModule = {
-      isBundle: false,
-      anonDefine: null
-    };
-
     loader.set('@@amd-helpers', loader.newModule({
       createDefine: createDefine,
       require: require,
-      define: define,
-      lastModule: lastModule
+      define: define
     }));
     loader.amdDefine = define;
     loader.amdRequire = require;
@@ -3644,32 +3944,15 @@ hookConstructor(function(constructor) {
   // define(varName); || define(function(require, exports) {}); || define({})
   var amdRegEx = /(?:^\uFEFF?|[^$_a-zA-Z\xA0-\uFFFF.])define\s*\(\s*("[^"]+"\s*,\s*|'[^']+'\s*,\s*)?\s*(\[(\s*(("[^"]+"|'[^']+')\s*,|\/\/.*\r?\n|\/\*(.|\s)*?\*\/))*(\s*("[^"]+"|'[^']+')\s*,?)?(\s*(\/\/.*\r?\n|\/\*(.|\s)*?\*\/))*\s*\]|function\s*|{|[_$a-zA-Z\xA0-\uFFFF][_$a-zA-Z0-9\xA0-\uFFFF]*\))/;
 
-  // script injection mode calls this function synchronously on load
-  hook('onScriptLoad', function(onScriptLoad) {
-    return function(load) {
-      onScriptLoad.call(this, load);
-
-      var lastModule = this.get('@@amd-helpers').lastModule;
-      if (lastModule.anonDefine || lastModule.isBundle) {
-        load.metadata.format = 'defined';
-        load.metadata.registered = true;
-        lastModule.isBundle = false;
-      }
-
-      if (lastModule.anonDefine) {
-        load.metadata.deps = load.metadata.deps ? load.metadata.deps.concat(lastModule.anonDefine.deps) : lastModule.anonDefine.deps;
-        load.metadata.execute = lastModule.anonDefine.execute;
-        lastModule.anonDefine = null;
-      }
-    };
-  });
-
   hook('fetch', function(fetch) {
     return function(load) {
-      if (load.metadata.format === 'amd' && !load.metadata.authorization)
+      if (load.metadata.format === 'amd' 
+          && !load.metadata.authorization 
+          && load.metadata.scriptLoad !== false)
         load.metadata.scriptLoad = true;
-      if (load.metadata.scriptLoad)
-        this.get('@@amd-helpers').createDefine(this);
+      // script load implies define global leak
+      if (load.metadata.scriptLoad && isBrowser)
+        this.get('@@amd-helpers').createDefine();
       return fetch.call(this, load);
     };
   });
@@ -3682,32 +3965,23 @@ hookConstructor(function(constructor) {
         load.metadata.format = 'amd';
         
         if (!loader.builder && loader.execute !== false) {
-          var removeDefine = this.get('@@amd-helpers').createDefine(loader);
+          var removeDefine = this.get('@@amd-helpers').createDefine();
 
-          __exec.call(loader, load);
-
-          removeDefine(loader);
-
-          var lastModule = this.get('@@amd-helpers').lastModule;
-
-          if (!lastModule.anonDefine && !lastModule.isBundle)
-            throw new TypeError('AMD module ' + load.name + ' did not define');
-
-          if (lastModule.anonDefine) {
-            load.metadata.deps = load.metadata.deps ? load.metadata.deps.concat(lastModule.anonDefine.deps) : lastModule.anonDefine.deps;
-            load.metadata.execute = lastModule.anonDefine.execute;
+          try {
+            __exec.call(loader, load);
+          }
+          finally {
+            removeDefine();
           }
 
-          lastModule.isBundle = false;
-          lastModule.anonDefine = null;
+          if (!load.metadata.entry && !load.metadata.bundle)
+            throw new TypeError('AMD module ' + load.name + ' did not define');
         }
         else {
           load.metadata.execute = function() {
             return load.metadata.builderExecute.apply(this, arguments);
           };
         }
-
-        return instantiate.call(loader, load);
       }
 
       return instantiate.call(loader, load);
@@ -3775,8 +4049,8 @@ hookConstructor(function(constructor) {
       }
 
       if (sync) {
-        argumentName = loader.normalizeSync(argumentName, parentName);
-        pluginName = loader.normalizeSync(pluginName, parentName);
+        argumentName = loader.normalizeSync(argumentName, parentName, true);
+        pluginName = loader.normalizeSync(pluginName, parentName, true);
 
         return normalizePluginParts(argumentName, pluginName);
       }
@@ -3913,12 +4187,14 @@ hookConstructor(function(constructor) {
         load.metadata.sourceMap = JSON.stringify(sourceMap);
       }
 
-      if (load.metadata.loaderModule && load.metadata.loaderModule.instantiate)
+      if (load.metadata.loaderModule && load.metadata.loaderModule.instantiate && !loader.builder)
         return Promise.resolve(load.metadata.loaderModule.instantiate.call(loader, load)).then(function(result) {
-          load.metadata.format = 'defined';
-          load.metadata.execute = function() {
+          load.metadata.entry = createEntry();
+          load.metadata.entry.execute = function() {
             return result;
-          };
+          }
+          load.metadata.entry.deps = load.metadata.deps;
+          load.metadata.format = 'defined';
           return instantiate.call(loader, load);
         });
       else
@@ -4018,7 +4294,7 @@ hookConstructor(function(constructor) {
     if (this.builder)
       return this['normalize'](conditionObj.module, parentName)
       .then(function(conditionModule) {
-        conditionObj.conditionModule = conditionModule;
+        conditionObj.module = conditionModule;
         return name.replace(interpolationRegEx, '#{' + serializeCondition(conditionObj) + '}');
       });
 
@@ -4026,6 +4302,9 @@ hookConstructor(function(constructor) {
     .then(function(conditionValue) {
       if (typeof conditionValue !== 'string')
         throw new TypeError('The condition value for ' + name + ' doesn\'t resolve to a string.');
+
+      if (conditionValue.indexOf('/') != -1)
+        throw new TypeError('Unabled to interpolate conditional ' + name + (parentName ? ' in ' + parentName : '') + '\n\tThe condition value ' + conditionValue + ' cannot contain a "/" separator.');
 
       return name.replace(interpolationRegEx, conditionValue);
     });
@@ -4053,18 +4332,6 @@ hookConstructor(function(constructor) {
       return conditionValue ? name.substr(0, booleanIndex) : '@empty';
     });
   }
-
-  hookConstructor(function(constructor) {
-    return function() {
-      constructor.call(this);
-
-      // standard environment module, starting small as backwards-compat matters!
-      this.set('@system-env', this.newModule({
-        browser: isBrowser,
-        node: !!this._nodeRequire
-      }));
-    };
-  });
 
   // no normalizeSync
   hook('normalize', function(normalize) {
@@ -4095,18 +4362,20 @@ hookConstructor(function(constructor) {
       var aliasDeps = load.metadata.deps || [];
       if (alias) {
         load.metadata.format = 'defined';
-        this.defined[load.name] = {
-          declarative: true,
-          deps: aliasDeps.concat([alias]),
-          declare: function(_export) {
-            return {
-              setters: [function(module) {
-                for (var p in module)
-                  _export(p, module[p]);
-              }],
-              execute: function() {}
-            };
-          }
+        var entry = createEntry();
+        this.defined[load.name] = entry;
+        entry.declarative = true;
+        entry.deps = aliasDeps.concat([alias]);
+        entry.declare = function(_export) {
+          return {
+            setters: [function(module) {
+              for (var p in module)
+                _export(p, module[p]);
+              if (module.__useDefault)
+                entry.module.exports.__useDefault = true;
+            }],
+            execute: function() {}
+          };
         };
         return '';
       }
@@ -4376,7 +4645,7 @@ function getBundleFor(loader, name) {
 })();
   
 System = new SystemJSLoader();
-System.version = '0.19.0 Standard';
+System.version = '0.19.9 Standard';
   // -- exporting --
 
   if (typeof exports === 'object')

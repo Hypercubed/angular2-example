@@ -1,0 +1,1 @@
+module.exports = require("npm:es7-reflect-metadata@1.4.0/dist/node.js");

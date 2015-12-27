@@ -1,0 +1,1 @@
+module.exports = require("npm:es6-shim@0.34.0/es6-shim");
