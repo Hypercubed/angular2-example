@@ -7,10 +7,10 @@
     "start:dist": "npm run jspm:bundle && npm start",
     "lint": "semistandard app/**/*.js",
     "jspm:bundle": "jspm bundle components/boot --inject --minify",
-    "deploy": "npm run jspm:bundle && ./deploy.sh && jspm unbundle"
+    "jspm:unbundle": "jspm unbundle && rm app/build.*",
+    "deploy": "npm run jspm:bundle && gh-pages -d app && npm run jspm:unbundle"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "semistandard": {
     "parser": "babel-eslint"
   },
@@ -40,9 +40,10 @@
     }
   },
   "devDependencies": {
+    "babel-eslint": "^5.0.0-beta6",
     "browser-sync": "^2.10.1",
+    "gh-pages": "^0.8.0",
     "jspm": "^0.16.6",
-    "semistandard": "^7.0.4",
-    "babel-eslint": "^5.0.0-beta6"
+    "semistandard": "^7.0.4"
   }
 }
