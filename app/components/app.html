@@ -1,0 +1,13 @@
+<div class="container">
+  <h1>{{title}}</h1>
+
+  <h2>Max</h2>
+  <input type="number" class="form-control" [(ngModel)]="max" (ngModelChange)="update()">
+
+  <h2>Input {{input.length}}</h2>
+
+  <textarea class="form-control" rows="10" [(ngModel)]="input" (ngModelChange)="update()"></textarea>
+
+  <h2>Output {{output.length}}</h2>
+  <textarea class="form-control" readonly rows="10" [ngModel]="output"></textarea>
+</div>

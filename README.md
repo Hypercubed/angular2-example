@@ -4,3 +4,4 @@
 * Bootstrap
 * JSPM + SystemJS
 * Babel (ES6 + ES7 Decorators)
+* semistandard
