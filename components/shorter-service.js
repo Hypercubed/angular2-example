@@ -20,8 +20,6 @@ var replaceText = [
 
   [/one hundred/gi, '100'],
 
-
-
   [/ninety/gi, '90'],
   [/eighty/gi, '80'],
   [/seventy/gi, '70'],
