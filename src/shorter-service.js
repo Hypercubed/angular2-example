@@ -13,12 +13,14 @@ console.log(_replaceText); */
 var replaceText = [
   [/\s\s+/g, ' '],
 
-  [/\.\.\./gi,'…'],
+  [/\.\.\./gi, '…'],
   [/\. /gi, '．'],
   [/\, /gi, '，'],
   [/\.$/g, ''],
 
   [/one hundred/gi, '100'],
+
+
 
   [/ninety/gi, '90'],
   [/eighty/gi, '80'],
@@ -95,7 +97,7 @@ var replaceText = [
   [/\bmovement\b/gi, 'act'],
   [/\bpossibility\b/gi, 'law'],
   [/\bpossibility\b/gi, 'end'],
-  //[/\bwhite\b/gi, 'dim'],
+  // [/\bwhite\b/gi, 'dim'],
   [/\bminute\b/gi, 'nice'],
   [/\bunderstanding\b/gi, 'depth'],
   [/\breport\b/gi, 'say'],
@@ -1061,13 +1063,18 @@ var replaceText = [
   [/\bgrand\b/gi, 'big'],
   [/\bdestitution\b/gi, 'want'],
 
-  [/without/gi,'w/o'],
-  [/with/gi,'w/'],
+  [/without/gi, 'w/o'],
+  [/with/gi, 'w/'],
 
   [/in my humble opinion/gi, 'IMHO'],
   [/in real life/gi, 'IRL'],
   [/just kidding/gi, 'JK'],
   [/see you later/gi, 'cul8r'],
+  [/\bbye for now\b/gi, 'BFN'],
+  [/\bby the way\b/gi, 'BTW'],
+  [/\bI don’t know\b/gi, 'IDK'],
+  [/\bin case you missed it\b/gi, 'ICYMI'],
+  [/\bto be honest.\b/gi, 'TBH'],
 
   [/cc/gi, '㏄'],
   [/ms/gi, '㎳'],
@@ -1165,7 +1172,7 @@ var replaceText = [
   [/\bfacebook\b/gi, 'FB'],
   [/\byoutube\b/gi, 'YT'],
   [/\babout\b/gi, 'abt'],
-  [/\bbefore\b/gi, 'bf'],
+  [/\bbefore\b/gi, 'b4'],
   [/\btext\b/gi, 'txt'],
   [/\blike\b/gi, 'lk'],
   [/\bthen\b/gi, 'thn'],
@@ -1192,16 +1199,17 @@ var replaceText = [
   [/\? /g, '?'],
   [/\! /g, '!']
 
-  //synymons for plurals, preserve capitalization, smarter ordering
-  //more 1337 speak
-  //user input
-  //preserve urls and hashags
-  //goal words: algorithm, replacements, substitutions, approximations
+  // synymons for plurals, preserve capitalization, smarter ordering
+  // more 1337 speak
+  // user input
+  // preserve urls and hashags
+  // goal words: algorithm, replacements, substitutions, approximations
 ];
 
-export function transform(s, max) {
-  var i = 0, len = replaceText.length;
-  while (i <len && s.length > max) {
+export function transform (s, max) {
+  var i = 0;
+  var len = replaceText.length;
+  while (i < len && s.length > max) {
     var v = replaceText[i];
     s = s.replace(v[0], v[1]);
     i++;
