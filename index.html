@@ -2,6 +2,7 @@
 <html>
 
 <head>
+  <base href="/">
   <script src="jspm_packages/system.js"></script>
   <script src="config.js"></script>
 </head>
@@ -10,7 +11,7 @@
   <my-app>Loading...</my-app>
   <script>
     System.config({
-      packages: {'src': {defaultExtension: 'js'}}
+      packages: {'components': {defaultExtension: 'js'}}
     });
     System.import('components/boot')
       .then(null, console.error.bind(console));
