@@ -11,7 +11,8 @@ System.config({
   },
   paths: {
     "github:*": "jspm_packages/github/*",
-    "npm:*": "jspm_packages/npm/*"
+    "npm:*": "jspm_packages/npm/*",
+    "jspm:*": "jspm_packages/jspm/*"
   },
 
   map: {
@@ -25,8 +26,12 @@ System.config({
     "es6-promise": "npm:es6-promise@3.0.2",
     "es6-shim": "npm:es6-shim@0.34.0",
     "es7-reflect-metadata": "npm:es7-reflect-metadata@1.4.0",
+    "md": "github:guybedford/system-md@0.0.3",
     "text": "github:systemjs/plugin-text@0.0.2",
     "zone.js": "npm:zone.js@0.5.10",
+    "github:guybedford/system-md@0.0.3": {
+      "showdown": "github:showdownjs/showdown@1.3.0"
+    },
     "github:jspm/nodelibs-assert@0.1.0": {
       "assert": "npm:assert@1.3.0"
     },

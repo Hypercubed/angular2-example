@@ -1,13 +1,25 @@
+<nav class="navbar navbar-default navbar-fixed-top">
+  <div class="container">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" [routerLink]="['Dashboard']">Home</a>
+    </div>
+
+    <!-- Collect the nav links, forms, and other content for toggling -->
+    <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+      <ul class="nav navbar-nav">
+      </ul>
+      <ul class="nav navbar-nav navbar-right">
+        <li><a [routerLink]="['About']">About</a></li>
+      </ul>
+    </div><!-- /.navbar-collapse -->
+  </div>
+</nav>
 <div class="container">
-  <h1>{{title}}</h1>
-
-  <h2>Max</h2>
-  <input type="number" class="form-control" [(ngModel)]="max" (ngModelChange)="update()">
-
-  <h2>Input {{input.length}}</h2>
-
-  <textarea class="form-control" rows="10" [(ngModel)]="input" (ngModelChange)="update()"></textarea>
-
-  <h2>Output {{output.length}}</h2>
-  <textarea class="form-control" readonly rows="10" [ngModel]="output"></textarea>
+  <router-outlet></router-outlet>
 </div>
