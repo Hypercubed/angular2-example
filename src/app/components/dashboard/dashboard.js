@@ -4,10 +4,11 @@ import {FORM_DIRECTIVES} from 'angular2/common';
 import template from './dashboard.html!text';
 import {transform as transformService} from '../../services/shorter-service';
 
-import twttr from 'twitter-text';
+import {TweetLengthPipe} from '../../pipes/tweet-length/tweet-length';
 
 @Component({
   template,
+  pipes: [TweetLengthPipe],
   directives: [FORM_DIRECTIVES]
 })
 export class DashboardComponent {
@@ -20,9 +21,5 @@ export class DashboardComponent {
 
   update () {
     this.output = transformService(this.input, { max: this.max });
-  }
-
-  tweetLength (l) {
-    return twttr.getTweetLength(l);
   }
 }

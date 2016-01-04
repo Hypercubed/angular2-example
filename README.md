@@ -1,18 +1,19 @@
 # Angular 2 + JSPM!
 
-A simple example of Angular 2 using SystemJS.
+A simple example of Angular 2 using JSPM/SystemJS.
 
-This repo is an example of [Angular 2](https://angular.io/) application using [JSPM](http://jspm.io/).  In this example I use NPM for all development tools and build scripts (no gulp or grunt).  The front end resources are installed and managed using JSPM and loaded using [SystemJS](https://github.com/systemjs/systemjs) (the Universal dynamic module loader).  JavaScript resources, styles and templates are dynamically loaded during development and bundled for production using [SystemJS builder](https://github.com/systemjs/builder).  
+This repo is an example of [Angular 2](https://angular.io/) application using [SystemJS](https://github.com/systemjs/systemjs) and [JSPM](http://jspm.io/).  In this example I use NPM for all development tools and build scripts (no gulp or grunt).  The front end resources are installed and managed using JSPM and loaded using SystemJS (the Universal dynamic module loader).  JavaScript resources, styles and templates are dynamically loaded during development and bundled for production using [SystemJS builder](https://github.com/systemjs/builder) via the JSPOM cli.  
 
 * Angular2 Beta-0
 * ES6 syntax and modules (+ES7 Decorators) via Babel (no typescript)
 * [Twitter Bootstrap](http://getbootstrap.com/)
 * Manage front end resources using JSPM
+* Load resources using SystemJS
 * Bundle builds via SystemJS Builder
-* Template Compilation
+* Template and styles compilation via SystemJS plugins
 * [Semi-Standard Style](https://github.com/Flet/semistandard) (because languages have punctuation)
 * gh-pages deploy via [tschaub/gh-pages](https://github.com/tschaub/gh-pages)
-* Routing
+* Routing capability
 
 ## Quick start
 
