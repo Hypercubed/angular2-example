@@ -1,6 +1,17 @@
-.vscode
-node_modules
-jspm_packages
+# dependencies
+/node_modules
+/src/jspm_packages
+
+# compiled output
 .publish
-app/build.js
-app/build.js.map
+src/build.js
+src/build.js.map
+
+# misc
+.vscode
+/.sass-cache
+/connect.lock
+/coverage/*
+/libpeerconnection.log
+npm-debug.log
+testem.log

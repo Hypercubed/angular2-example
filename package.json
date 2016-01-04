@@ -4,12 +4,12 @@
   "version": "0.0.1",
   "scripts": {
     "postinstall": "jspm install",
-    "start": "browser-sync start --server app",
+    "start": "browser-sync start --server src",
     "start:dist": "npm run bundle && npm start",
-    "check": "semistandard app/**/*.js",
-    "bundle": "jspm bundle components/boot --inject --minify",
-    "unbundle": "jspm unbundle && rm app/build.*",
-    "deploy": "npm run bundle && gh-pages -d app && npm run unbundle"
+    "check": "semistandard src/app/**/*.js",
+    "bundle": "jspm bundle app --inject --minify",
+    "unbundle": "jspm unbundle && rm src/build.*",
+    "deploy": "npm run bundle && gh-pages -d src && npm run unbundle"
   },
   "dependencies": {},
   "semistandard": {
@@ -17,7 +17,7 @@
   },
   "jspm": {
     "directories": {
-      "baseURL": "app"
+      "baseURL": "src"
     },
     "dependencies": {
       "angular2": "npm:angular2@^2.0.0-beta.0",
@@ -29,6 +29,7 @@
       "es7-reflect-metadata": "npm:es7-reflect-metadata@^1.4.0",
       "md": "github:guybedford/system-md@^0.0.3",
       "text": "github:systemjs/plugin-text@^0.0.2",
+      "twitter-text": "npm:twitter-text@^1.13.2",
       "zone.js": "npm:zone.js@^0.5.10"
     },
     "devDependencies": {

@@ -17,7 +17,7 @@ This repo is an example of [Angular 2](https://angular.io/) application using [J
 ## Quick start
 
 ```bash
-git clone https://github.com/Hypercubed/angular2-example.git
+git clone --depth 1 https://github.com/Hypercubed/angular2-example.git
 cd angular2-example
 npm install
 npm start
@@ -30,3 +30,38 @@ npm start
 - `npm run unbundle` - unbundle resources and remove bundle
 - `npm run start:dist` - bundle and start server
 - `npm run deploy` - bundle, deploy to gh-pages, unbundle
+
+## File Structure
+
+This example follows the [angular-cli](https://github.com/angular/angular-cli) structure.
+
+root/
+ ├──src/
+ │   ├──jspm_packages/
+ │   ├──app/
+ │   │   ├──components/
+ │   │   ├──services/
+ │   │   ├──pipes/
+ │   │   ├──main.js
+ │   │   ├──main.html
+ │   │   └──main.css
+ |   ├──app.js
+ |   ├──index.html
+ |   ├──config.js
+ |   ├──build.js
+ |   └──build.js.map
+ ├──package.json
+ └──README.md
+
+## Other Example Repos
+
+* [angular2-go](https://github.com/johnpapa/angular2-go) (John Papa)
+  - TypeScript, SystemJS
+* [ng2-jspm-seed](https://github.com/robwormald/ng2-jspm-seed) (Rob Wormald)
+  - TypeScript, Gulp, JSPM
+* [babel-angular2-app](https://github.com/shuhei/babel-angular2-app) (Shuhei Kagawa)
+  - Babel, ES6+, Gulp, Karma, Browserify
+
+## License
+
+MIT

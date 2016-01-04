@@ -1,21 +1,15 @@
 
-/* var _replaceText = [
-  ["\s\s+/g", ' '],
-  ["\.\.\./gi",'…']
-];
-
-_replaceText = _replaceText.map(function(d) {
-  return [new RegExp(d[0]),d[1]];
-});
-
-console.log(_replaceText); */
+import twttr from 'twitter-text';
 
 var replaceText = [
-  [/\s\s+/g, ' '],
+  [/[\u0009-\u000D\u0020\u0085\u00A0\u1680\u180E\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/g, ' '],
 
   [/\.\.\./gi, '…'],
   [/\. /gi, '．'],
   [/\, /gi, '，'],
+  [/\? /g, '？'],
+  [/\! /g, '！'],
+  [/\--/g, '—'],
   [/\.$/g, ''],
 
   [/one hundred/gi, '100'],
@@ -1072,7 +1066,9 @@ var replaceText = [
   [/\bby the way\b/gi, 'BTW'],
   [/\bI don’t know\b/gi, 'IDK'],
   [/\bin case you missed it\b/gi, 'ICYMI'],
-  [/\bto be honest.\b/gi, 'TBH'],
+  [/\bto be honest\b/gi, 'TBH'],
+  [/\bthank you\b/gi, 'TY'],
+  [/\byour welcome\b/gi, 'YW'],
 
   [/cc/gi, '㏄'],
   [/ms/gi, '㎳'],
@@ -1192,10 +1188,7 @@ var replaceText = [
   [/\byour\b/gi, 'ur'],
   [/\bat\b/gi, '@'],
   [/\bwhy\b/gi, 'y'],
-  [/\bbe+\b/gi, 'b'],
-
-  [/\? /g, '?'],
-  [/\! /g, '!']
+  [/\bbe+\b/gi, 'b']
 
   // synymons for plurals, preserve capitalization, smarter ordering
   // more 1337 speak
@@ -1204,13 +1197,49 @@ var replaceText = [
   // goal words: algorithm, replacements, substitutions, approximations
 ];
 
-export function transform (s, max) {
-  var i = 0;
-  var len = replaceText.length;
-  while (i < len && s.length > max) {
+const DELIM = String.fromCharCode(0xFFFF);
+
+function extractEntities (text) {
+  const entities = twttr.extractEntitiesWithIndices(text);
+
+  let beginIndex = 0;
+  let result = '';
+
+  for (let i = 0; i < entities.length; i++) {
+    let entity = entities[i];
+    result += text.substring(beginIndex, entity.indices[0]);
+    result += DELIM + i + DELIM;
+    beginIndex = entity.indices[1];
+  }
+  result += text.substring(beginIndex, text.length);
+
+  return {
+    text,
+    result,
+    entities
+  };
+}
+
+function reconstruct ({ text, result, entities }) {
+  for (let i = 0; i < entities.length; i++) {
+    const entity = entities[i];
+    const raw = text.slice(entity.indices[0], entity.indices[1]);
+    result = result.replace(DELIM + i + DELIM, raw);
+  }
+  return result;
+}
+
+export function transform (input, { max }) {
+  if (max === undefined) max = 140;
+
+  const extract = extractEntities(input);
+
+  let i = 0;
+  const len = replaceText.length;
+  while (i < len && twttr.getTweetLength(reconstruct(extract)) > max) {
     var v = replaceText[i];
-    s = s.replace(v[0], v[1]);
+    extract.result = extract.result.replace(v[0], v[1]);
     i++;
   }
-  return s;
+  return reconstruct(extract);
 }
