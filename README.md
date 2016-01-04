@@ -36,6 +36,7 @@ npm start
 
 This example follows the [angular-cli](https://github.com/angular/angular-cli) structure.
 
+```
 root/
  ├──src/
  │   ├──jspm_packages/
@@ -53,6 +54,7 @@ root/
  |   └──build.js.map
  ├──package.json
  └──README.md
+```
 
 ## Other Example Repos
 
