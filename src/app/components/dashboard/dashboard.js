@@ -17,7 +17,7 @@ import 'twitter';
 export class DashboardComponent {
   constructor () {
     this.max = 140;
-    this.title = transformService('Shorten your too large tweets', 0);
+    this.title = transformService('Shorten your too large tweets', { max: 0 });
     this.input = 'Imagine, a tweet.  Unfortunately, one hundred and forty characters is too little...  Here is a way to shorten your tweets. High five #angular2 and @Hypercubed  http://hypercubed.github.io/angular2-example/';
     this.update();
   }
