@@ -9,6 +9,7 @@ import {TweetLengthPipe, TweetEncode} from '../../pipes/tweet-length/tweet-lengt
 import 'twitter';
 
 @Component({
+  selector: 'my-dashboard',
   template,
   pipes: [TweetLengthPipe, TweetEncode],
   directives: [FORM_DIRECTIVES]
