@@ -10,3 +10,12 @@ export class TweetLengthPipe {
     return twttr.getTweetLength(value);
   }
 }
+
+@Pipe({
+  name: 'TweetEncode'
+})
+export class TweetEncode {
+  transform (value) {
+    return window.encodeURIComponent(value);
+  }
+}

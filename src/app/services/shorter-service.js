@@ -1176,7 +1176,7 @@ var replaceText = [
 
   [/\bplease retweet\b/gi, 'PRT'],
   [/\bhat tip\b/gi, 'HT'],
-  [/\bcharacters\b/gi, 'letters'],
+  // [/\bcharacters\b/gi, 'letters'],
   [/\bbye for now\b/gi, 'BFN'],
   [/\bur welcome\b/gi, 'YW'],
   [/\bunfortunately\b/gi, 'alas'],

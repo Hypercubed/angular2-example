@@ -15,6 +15,10 @@ This repo is an example of [Angular 2](https://angular.io/) application using [S
 * gh-pages deploy via [tschaub/gh-pages](https://github.com/tschaub/gh-pages)
 * Routing capability
 
+## How is JSPM/SystemJS different from WebPack
+
+Good explanation [here](https://github.com/angularclass/NG6-starter/tree/jspm#how-is-this-different-than-webpack).
+
 ## Quick start
 
 ```bash

@@ -12,7 +12,17 @@ System.config({
   paths: {
     "github:*": "jspm_packages/github/*",
     "npm:*": "jspm_packages/npm/*",
-    "jspm:*": "jspm_packages/jspm/*"
+    "jspm:*": "jspm_packages/jspm/*",
+    "twitter": "//platform.twitter.com/widgets.js"
+  },
+
+  meta: {
+    "twitter": {
+      "build": false,
+      "scriptLoad": true,
+      "format": "global",
+      "exports": "twttr"
+    }
   },
 
   map: {
