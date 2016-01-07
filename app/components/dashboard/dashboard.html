@@ -9,3 +9,7 @@
 
 <h2>Output {{output | TweetLength}}</h2>
 <textarea class="form-control" readonly rows="10" [ngModel]="output"></textarea>
+
+<a class="twitter-share-button" class="btn btn-link pull-right" role="button"
+  href="https://twitter.com/intent/tweet?text={{output | TweetEncode}}"
+  data-size="large">Tweet this</a>
