@@ -6,7 +6,8 @@ System.config({
     "optional": [
       "runtime",
       "optimisation.modules.system",
-      "es7.decorators"
+      "es7.decorators",
+      "es7.classProperties"
     ]
   },
   paths: {
@@ -37,6 +38,7 @@ System.config({
     "es6-shim": "npm:es6-shim@0.34.0",
     "es7-reflect-metadata": "npm:es7-reflect-metadata@1.4.0",
     "md": "github:guybedford/system-md@0.0.3",
+    "rxjs": "npm:rxjs@5.0.0-beta.0",
     "text": "github:systemjs/plugin-text@0.0.2",
     "twitter-text": "npm:twitter-text@1.13.2",
     "zone.js": "npm:zone.js@0.5.10",

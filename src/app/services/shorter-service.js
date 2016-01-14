@@ -1230,6 +1230,8 @@ function reconstruct ({ text, result, entities }) {
 }
 
 export function transform (input, { max }) {
+  console.log('update');
+
   if (max === undefined) max = 140;
 
   const extract = extractEntities(input);
